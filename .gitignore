@@ -27,3 +27,10 @@ build
 
 # Auto-downloaded tax rate CSV
 data/
+
+# Meilisearch binary and data
+meilisearch
+data.ms/
+
+# Misc
+cookies.txt
