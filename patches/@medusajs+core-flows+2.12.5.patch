@@ -1,0 +1,22 @@
+diff --git a/node_modules/@medusajs/core-flows/dist/cart/workflows/list-shipping-options-for-cart.js b/node_modules/@medusajs/core-flows/dist/cart/workflows/list-shipping-options-for-cart.js
+index aeb3046..99dc5bb 100644
+--- a/node_modules/@medusajs/core-flows/dist/cart/workflows/list-shipping-options-for-cart.js
++++ b/node_modules/@medusajs/core-flows/dist/cart/workflows/list-shipping-options-for-cart.js
+@@ -120,6 +120,7 @@ exports.listShippingOptionsForCartWorkflow = (0, workflows_sdk_1.createWorkflow)
+             ...fields_1.cartFieldsForPricingContext,
+             "items.*",
+             "items.variant.manage_inventory",
++            "items.variant.allow_backorder",
+             "items.variant.inventory_items.inventory_item_id",
+             "items.variant.inventory_items.inventory.requires_shipping",
+             "items.variant.inventory_items.inventory.location_levels.*",
+@@ -256,6 +257,9 @@ exports.listShippingOptionsForCartWorkflow = (0, workflows_sdk_1.createWorkflow)
+             if (!item.variant?.manage_inventory) {
+                 return false;
+             }
++            if (item.variant?.allow_backorder) {
++                return false;
++            }
+             return item.variant.inventory_items.some((inventoryItem) => {
+                 if (!inventoryItem.inventory.requires_shipping) {
+                     return false;
