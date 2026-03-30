@@ -236,7 +236,7 @@ function buildAdminNewQuoteEmail(data: {
     <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="text-align: center; margin-bottom: 20px;">
-        <img src="https://b2b.chimkins.com/logo.png" alt="Arrotti Group" style="max-width: 200px; height: auto;" />
+        <img src="https://arrottigroup.com/logo.png" alt="Arrotti Group" style="max-width: 200px; height: auto;" />
       </div>
       <h1 style="color: #333; margin-bottom: 10px;">New Quote Request</h1>
       <div style="background-color: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0;">
@@ -277,7 +277,7 @@ function buildCustomerQuoteSentEmail(data: {
     <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="text-align: center; margin-bottom: 20px;">
-        <img src="https://b2b.chimkins.com/logo.png" alt="Arrotti Group" style="max-width: 200px; height: auto;" />
+        <img src="https://arrottigroup.com/logo.png" alt="Arrotti Group" style="max-width: 200px; height: auto;" />
       </div>
       <h1 style="color: #333; margin-bottom: 10px;">Your Quote is Ready</h1>
       <p>Hi ${h(data.customerName)},</p>
@@ -321,7 +321,7 @@ function buildAdminQuoteAcceptedEmail(data: {
     <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="text-align: center; margin-bottom: 20px;">
-        <img src="https://b2b.chimkins.com/logo.png" alt="Arrotti Group" style="max-width: 200px; height: auto;" />
+        <img src="https://arrottigroup.com/logo.png" alt="Arrotti Group" style="max-width: 200px; height: auto;" />
       </div>
       <h1 style="color: #10b981; margin-bottom: 10px;">Quote Accepted</h1>
       <div style="background-color: #f0fdf4; padding: 20px; border-radius: 8px; margin: 20px 0;">
@@ -353,7 +353,7 @@ function buildCustomerQuoteExpiredEmail(data: {
     <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
       <div style="text-align: center; margin-bottom: 20px;">
-        <img src="https://b2b.chimkins.com/logo.png" alt="Arrotti Group" style="max-width: 200px; height: auto;" />
+        <img src="https://arrottigroup.com/logo.png" alt="Arrotti Group" style="max-width: 200px; height: auto;" />
       </div>
       <h1 style="color: #f59e0b; margin-bottom: 10px;">Your Quote Has Expired</h1>
       <p>Hi ${h(data.customerName)},</p>

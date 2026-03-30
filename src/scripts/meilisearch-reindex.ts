@@ -120,6 +120,8 @@ export default async function meilisearchReindex({
       "fitment.vehicle_id",
       "fitment.submodels",
       "fitment.conditions",
+      "fitment.notes",
+      "fitment.has_notes_notice",
     ],
   })
   console.log(`[reindex] Loaded ${allProductFitments?.length ?? 0} product-fitment links`)
@@ -130,6 +132,8 @@ export default async function meilisearchReindex({
     vehicle_id: string
     submodels: string[]
     conditions: string
+    notes: string | null
+    has_notes_notice: boolean
   }
   const fitmentByProduct = new Map<string, FitmentRecord[]>()
 
@@ -159,6 +163,8 @@ export default async function meilisearchReindex({
       vehicle_id: fitment.vehicle_id,
       submodels,
       conditions,
+      notes: fitment.notes || null,
+      has_notes_notice: fitment.has_notes_notice || false,
     })
   }
   console.log(`[reindex] Built fitment map for ${fitmentByProduct.size} products (${(performance.now() - fitmentStart).toFixed(0)}ms)`)
@@ -371,14 +377,16 @@ export default async function meilisearchReindex({
 
       // Build structured fitments array: group fitment records by vehicle_id,
       // merge conditions for same vehicle
-      const byVehicle = new Map<string, { submodels: Set<string>; conditions: Set<string> }>()
+      const byVehicle = new Map<string, { submodels: Set<string>; conditions: Set<string>; notes: Set<string>; has_notes_notice: boolean }>()
       for (const rec of fitmentRecords) {
         if (!byVehicle.has(rec.vehicle_id)) {
-          byVehicle.set(rec.vehicle_id, { submodels: new Set(), conditions: new Set() })
+          byVehicle.set(rec.vehicle_id, { submodels: new Set(), conditions: new Set(), notes: new Set(), has_notes_notice: false })
         }
         const entry = byVehicle.get(rec.vehicle_id)!
         for (const s of rec.submodels) entry.submodels.add(s)
         if (rec.conditions) entry.conditions.add(rec.conditions)
+        if (rec.notes) rec.notes.split("/").forEach(n => n.trim() && entry.notes.add(n.trim()))
+        if (rec.has_notes_notice) entry.has_notes_notice = true
       }
 
       const structuredFitments = Array.from(byVehicle.entries()).map(([vid, data]) => {
@@ -394,6 +402,8 @@ export default async function meilisearchReindex({
           model: vInfo?.model ?? "",
           submodels: Array.from(data.submodels),
           conditions: Array.from(data.conditions),
+          notes: Array.from(data.notes),
+          has_notes_notice: data.has_notes_notice,
         }
       })
 

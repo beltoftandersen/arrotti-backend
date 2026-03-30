@@ -22,7 +22,7 @@ type CustomerMetadata = {
 }
 
 const ADMIN_EMAIL = process.env.CONTACT_EMAIL || "christian@chimkins.com"
-const B2B_PORTAL_URL = process.env.B2B_PORTAL_URL || "https://b2b.chimkins.com"
+const B2B_PORTAL_URL = process.env.B2B_PORTAL_URL || "https://arrottigroup.com"
 
 /**
  * Subscriber for wholesale customer registration.

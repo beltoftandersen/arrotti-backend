@@ -432,7 +432,7 @@ module.exports = defineConfig({
   },
   admin: {
     backendUrl: "/",
-    storefrontUrl: process.env.MEDUSA_STOREFRONT_URL || "https://b2b.chimkins.com",
+    storefrontUrl: process.env.MEDUSA_STOREFRONT_URL || "https://arrottigroup.com",
     vite: (config) => {
       return {
         ...config,

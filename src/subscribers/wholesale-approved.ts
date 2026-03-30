@@ -6,7 +6,7 @@ type WholesaleApprovedData = {
   id: string
 }
 
-const B2B_PORTAL_URL = process.env.B2B_PORTAL_URL || "https://b2b.chimkins.com"
+const B2B_PORTAL_URL = process.env.B2B_PORTAL_URL || "https://arrottigroup.com"
 
 /**
  * Subscriber for wholesale customer approval.

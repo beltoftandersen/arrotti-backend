@@ -43,7 +43,7 @@ const s3 = new S3Client({
   forcePathStyle: true,
 })
 const S3_BUCKET = process.env.S3_BUCKET!
-const S3_FILE_URL = process.env.S3_FILE_URL! // e.g. https://api-s3.chimkins.com/carparts
+const S3_FILE_URL = process.env.S3_FILE_URL! // e.g. https://api-s3.arrottigroup.com/carparts
 
 // --- Postgres ---
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
