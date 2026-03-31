@@ -236,3 +236,35 @@ export async function getInvoice(
   const response = await client.get<QboInvoiceResponse>(`invoice/${invoiceId}`)
   return response.Invoice
 }
+
+/**
+ * Delete an invoice in QuickBooks
+ * Note: Only works on invoices that haven't been paid/partially paid.
+ * For paid invoices, void first.
+ */
+export async function deleteInvoice(
+  client: QboClient,
+  invoiceId: string,
+  syncToken: string
+): Promise<void> {
+  await client.post("invoice?operation=delete", {
+    Id: invoiceId,
+    SyncToken: syncToken,
+  })
+  console.log(`[QBO] Deleted invoice ${invoiceId}`)
+}
+
+/**
+ * Void an invoice in QuickBooks (for invoices with payments)
+ */
+export async function voidInvoice(
+  client: QboClient,
+  invoiceId: string,
+  syncToken: string
+): Promise<void> {
+  await client.post("invoice?operation=void", {
+    Id: invoiceId,
+    SyncToken: syncToken,
+  })
+  console.log(`[QBO] Voided invoice ${invoiceId}`)
+}

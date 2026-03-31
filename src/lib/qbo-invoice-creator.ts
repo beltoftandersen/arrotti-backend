@@ -6,7 +6,7 @@
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { QboClient } from "./qbo-client"
 import { findOrCreateCustomer } from "./qbo-customer"
-import { createInvoice, findInvoiceByOrderNumber } from "./qbo-invoice"
+import { createInvoice, findInvoiceByOrderNumber, getInvoice, deleteInvoice, voidInvoice } from "./qbo-invoice"
 import { findOrCreateTermByDays } from "./qbo-terms"
 import { findItemByName, findAccountByName } from "./qbo-accounts"
 import { QBO_CONNECTION_MODULE } from "../modules/qbo-connection"
@@ -290,4 +290,70 @@ export async function createQboInvoiceForOrder(
     total: invoice.TotalAmt,
     message: `Invoice ${invoice.DocNumber} created successfully`,
   }
+}
+
+/**
+ * Recreate a QBO invoice for an order (delete existing + create new)
+ */
+export async function recreateQboInvoiceForOrder(
+  orderId: string,
+  container: any
+): Promise<CreateInvoiceResult> {
+  const logger = container.resolve("logger")
+  const qboConnectionService: QboConnectionService = container.resolve(QBO_CONNECTION_MODULE)
+
+  const isConnected = await qboConnectionService.isConnected()
+  if (!isConnected) {
+    return { success: false, message: "QuickBooks is not connected" }
+  }
+
+  // Get order display_id
+  const query = container.resolve(ContainerRegistrationKeys.QUERY)
+  const { data: [order] } = await query.graph({
+    entity: "order",
+    fields: ["id", "display_id"],
+    filters: { id: orderId },
+  })
+
+  if (!order) {
+    return { success: false, message: `Order ${orderId} not found` }
+  }
+
+  const orderNumber = order.display_id?.toString() || order.id
+  const client = new QboClient(qboConnectionService)
+
+  // Find and delete existing invoice
+  const existingInvoice = await findInvoiceByOrderNumber(client, orderNumber)
+  if (existingInvoice) {
+    const balance = Number(existingInvoice.Balance) || 0
+    if (balance > 0 && balance < existingInvoice.TotalAmt) {
+      // Partially paid — cannot delete, must void
+      return {
+        success: false,
+        message: `Invoice ${existingInvoice.DocNumber} is partially paid ($${balance.toFixed(2)} remaining). Void it manually in QBO first.`,
+      }
+    }
+
+    try {
+      // Get fresh invoice with SyncToken
+      const freshInvoice = await getInvoice(client, existingInvoice.Id)
+      if (balance <= 0) {
+        // Fully paid — void instead of delete
+        await voidInvoice(client, freshInvoice.Id, freshInvoice.SyncToken!)
+        logger.info(`[QBO Invoice] Voided paid invoice ${freshInvoice.DocNumber} for recreate`)
+      } else {
+        // Unpaid — safe to delete
+        await deleteInvoice(client, freshInvoice.Id, freshInvoice.SyncToken!)
+        logger.info(`[QBO Invoice] Deleted invoice ${freshInvoice.DocNumber} for recreate`)
+      }
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to remove existing invoice: ${(error as Error).message}`,
+      }
+    }
+  }
+
+  // Create fresh invoice
+  return createQboInvoiceForOrder(orderId, container)
 }

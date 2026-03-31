@@ -5,7 +5,7 @@
  */
 
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import { createQboInvoiceForOrder } from "../../../../../lib/qbo-invoice-creator"
+import { createQboInvoiceForOrder, recreateQboInvoiceForOrder } from "../../../../../lib/qbo-invoice-creator"
 import { QboClient } from "../../../../../lib/qbo-client"
 import { findInvoiceByOrderNumber } from "../../../../../lib/qbo-invoice"
 import { QBO_CONNECTION_MODULE } from "../../../../../modules/qbo-connection"
@@ -132,13 +132,14 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
  */
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const orderId = req.params.id
+  const recreate = req.query.recreate === "true"
 
   try {
-    const result = await createQboInvoiceForOrder(orderId, req.scope)
+    const result = recreate
+      ? await recreateQboInvoiceForOrder(orderId, req.scope)
+      : await createQboInvoiceForOrder(orderId, req.scope)
 
     if (result.success) {
-      // Save invoice info to order metadata
-      // New invoices have balance = total (unpaid)
       const invoiceData: InvoiceMetadata = {
         connected: true,
         exists: true,

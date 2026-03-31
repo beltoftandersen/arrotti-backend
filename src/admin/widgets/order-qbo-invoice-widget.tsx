@@ -107,7 +107,10 @@ const OrderQboInvoiceWidget = ({ data }: DetailWidgetProps<AdminOrder>) => {
     setSuccess(null)
 
     try {
-      const response = await fetch(`/admin/orders/${data.id}/qbo-invoice`, {
+      const url = status?.exists
+        ? `/admin/orders/${data.id}/qbo-invoice?recreate=true`
+        : `/admin/orders/${data.id}/qbo-invoice`
+      const response = await fetch(url, {
         method: "POST",
         credentials: "include",
         headers: {
