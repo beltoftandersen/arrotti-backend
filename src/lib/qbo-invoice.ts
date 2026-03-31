@@ -96,6 +96,10 @@ export type InvoiceInput = {
   salesChannelName?: string
   /** QBO Item/Service to use for line items (maps to income account) */
   incomeItemRef?: { value: string; name: string }
+  /** Discount amount (absolute value, not percentage) */
+  discountAmount?: number
+  /** QBO Account to track discounts (e.g., "Discounts given") */
+  discountAccountRef?: { value: string; name: string }
 }
 
 /**
@@ -105,7 +109,7 @@ export async function createInvoice(
   client: QboClient,
   input: InvoiceInput
 ): Promise<QboInvoice> {
-  const lines: QboInvoiceLine[] = input.lines.map((line, index) => ({
+  const lines: Record<string, unknown>[] = input.lines.map((line, index) => ({
     LineNum: index + 1,
     Description: line.sku ? `[${line.sku}] ${line.description}` : line.description,
     Amount: Math.round(line.quantity * line.unitPrice * 100) / 100,
@@ -130,6 +134,21 @@ export async function createInvoice(
         UnitPrice: input.shippingAmount,
       },
     })
+  }
+
+  // Add discount as a DiscountLineDetail if present
+  if (input.discountAmount && input.discountAmount > 0) {
+    const discountLine: Record<string, unknown> = {
+      Amount: input.discountAmount,
+      DetailType: "DiscountLineDetail",
+      DiscountLineDetail: {
+        PercentBased: false,
+      },
+    }
+    if (input.discountAccountRef) {
+      (discountLine.DiscountLineDetail as Record<string, unknown>).DiscountAccountRef = input.discountAccountRef
+    }
+    lines.push(discountLine as any)
   }
 
   const invoiceData: Record<string, unknown> = {

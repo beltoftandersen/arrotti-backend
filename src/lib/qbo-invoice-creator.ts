@@ -8,7 +8,7 @@ import { QboClient } from "./qbo-client"
 import { findOrCreateCustomer } from "./qbo-customer"
 import { createInvoice, findInvoiceByOrderNumber } from "./qbo-invoice"
 import { findOrCreateTermByDays } from "./qbo-terms"
-import { findItemByName } from "./qbo-accounts"
+import { findItemByName, findAccountByName } from "./qbo-accounts"
 import { QBO_CONNECTION_MODULE } from "../modules/qbo-connection"
 import QboConnectionService from "../modules/qbo-connection/service"
 
@@ -21,6 +21,13 @@ const SALES_CHANNEL_TO_QBO_ITEM: Record<string, string> = {
   // Add more mappings as needed:
   // "Default Sales Channel": "Ecommerce Sales",
 }
+
+/**
+ * QBO account name for tracking discounts/promotions
+ * Must match an existing account in QBO (e.g., "Discounts given", "Sales Discounts")
+ * Set to null to record discounts without an account reference
+ */
+const QBO_DISCOUNT_ACCOUNT: string | null = "Discounts given"
 
 type InvoiceMetadata = {
   connected: boolean
@@ -218,6 +225,17 @@ export async function createQboInvoiceForOrder(
     }
   }
 
+  // Look up QBO discount account
+  let discountAccountRef: { value: string; name: string } | undefined
+  if (QBO_DISCOUNT_ACCOUNT && toNumber(order.discount_total) > 0) {
+    discountAccountRef = await findAccountByName(client, QBO_DISCOUNT_ACCOUNT) || undefined
+    if (discountAccountRef) {
+      logger.info(`[QBO Invoice] Using discount account "${QBO_DISCOUNT_ACCOUNT}"`)
+    } else {
+      logger.warn(`[QBO Invoice] Discount account "${QBO_DISCOUNT_ACCOUNT}" not found in QBO`)
+    }
+  }
+
   // Create invoice
   const invoice = await createInvoice(client, {
     customerId: customer.Id,
@@ -245,6 +263,8 @@ export async function createQboInvoiceForOrder(
     salesTermRef,
     salesChannelName: (order as any).sales_channel?.name,
     incomeItemRef,
+    discountAmount: toNumber(order.discount_total),
+    discountAccountRef,
   })
 
   logger.info(
