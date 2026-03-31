@@ -40,6 +40,8 @@ const OrderQboInvoiceWidget = ({ data }: DetailWidgetProps<AdminOrder>) => {
 
   // Track if payment was previously captured
   const wasCapturedRef = useRef(hasPaymentCaptured(data))
+  const statusRef = useRef(status)
+  statusRef.current = status
 
   // Update local state when order data changes (e.g., after metadata update)
   useEffect(() => {
@@ -54,10 +56,12 @@ const OrderQboInvoiceWidget = ({ data }: DetailWidgetProps<AdminOrder>) => {
   useEffect(() => {
     const isCapturedNow = hasPaymentCaptured(data)
     const wasCaptured = wasCapturedRef.current
+    wasCapturedRef.current = isCapturedNow
 
     // If payment just got captured, auto-refresh after a delay
     // (gives time for QBO payment to be recorded)
-    if (isCapturedNow && !wasCaptured && status?.exists && !status?.is_paid) {
+    const currentStatus = statusRef.current
+    if (isCapturedNow && !wasCaptured && currentStatus?.exists && !currentStatus?.is_paid) {
       const timer = setTimeout(async () => {
         setLoading(true)
         try {
@@ -73,12 +77,10 @@ const OrderQboInvoiceWidget = ({ data }: DetailWidgetProps<AdminOrder>) => {
         } finally {
           setLoading(false)
         }
-      }, 3000) // 3 second delay for QBO sync
+      }, 3000)
       return () => clearTimeout(timer)
     }
-
-    wasCapturedRef.current = isCapturedNow
-  }, [data, status])
+  }, [data])
 
   const loadStatus = async () => {
     setLoading(true)
