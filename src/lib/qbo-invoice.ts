@@ -132,30 +132,23 @@ export async function createInvoice(
     })
   }
 
-  // Add tax as a line item if present (QBO can also handle tax differently)
-  if (input.taxAmount && input.taxAmount > 0) {
-    lines.push({
-      LineNum: lines.length + 1,
-      Description: "Tax",
-      Amount: input.taxAmount,
-      DetailType: "SalesItemLineDetail",
-      SalesItemLineDetail: {
-        ItemRef: input.incomeItemRef,
-        Qty: 1,
-        UnitPrice: input.taxAmount,
-      },
-    })
-  }
-
   const invoiceData: Record<string, unknown> = {
     CustomerRef: {
       value: input.customerId,
       name: input.customerName,
     },
-    TxnDate: input.orderDate.split("T")[0], // YYYY-MM-DD format
+    TxnDate: input.orderDate.split("T")[0],
     Line: lines,
     PrivateNote: `${input.salesChannelName || "Online"} Order: ${input.orderNumber}`,
     DocNumber: input.orderNumber,
+    GlobalTaxCalculation: "TaxExcluded",
+  }
+
+  // Add tax using QBO's native tax field (not as a line item)
+  if (input.taxAmount && input.taxAmount > 0) {
+    invoiceData.TxnTaxDetail = {
+      TotalTax: input.taxAmount,
+    }
   }
 
   if (input.email) {
