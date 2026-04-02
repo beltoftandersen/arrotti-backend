@@ -1556,6 +1556,34 @@ export default async function importFromMerged({ container }: ExecArgs) {
   }
 
   // ============================================================
+  // Sync category shipping defaults to all variants
+  // ============================================================
+  logger.info("\n--- Syncing category shipping defaults ---")
+  try {
+    const shippingResult = await medusaPool.query(`
+      UPDATE product_variant pv
+      SET
+        weight = COALESCE((cat.metadata->'shipping'->>'weight')::numeric, (parent.metadata->'shipping'->>'weight')::numeric),
+        length = COALESCE((cat.metadata->'shipping'->>'length')::numeric, (parent.metadata->'shipping'->>'length')::numeric),
+        width  = COALESCE((cat.metadata->'shipping'->>'width')::numeric,  (parent.metadata->'shipping'->>'width')::numeric),
+        height = COALESCE((cat.metadata->'shipping'->>'height')::numeric, (parent.metadata->'shipping'->>'height')::numeric),
+        updated_at = NOW()
+      FROM product_category_product pcp
+      JOIN product_category cat ON cat.id = pcp.product_category_id
+      LEFT JOIN product_category parent ON parent.id = cat.parent_category_id
+      WHERE pv.product_id = pcp.product_id
+        AND pv.deleted_at IS NULL
+        AND cat.parent_category_id IS NOT NULL
+        AND cat.deleted_at IS NULL
+        AND (cat.metadata->'shipping' IS NOT NULL OR parent.metadata->'shipping' IS NOT NULL)
+    `)
+    logger.info(`  Updated ${shippingResult.rowCount} variants with category shipping defaults`)
+  } catch (err: any) {
+    logger.error(`  Category shipping sync failed: ${err.message}`)
+    errors++
+  }
+
+  // ============================================================
   // Reindex Meilisearch
   // ============================================================
   logger.info("\n--- Reindexing Meilisearch ---")
