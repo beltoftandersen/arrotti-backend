@@ -100,16 +100,25 @@ const productVariantsFields = [
 ]
 
 // Fields needed by confirmVariantInventoryWorkflow
+// Must match @medusajs/core-flows prepare-confirm-inventory-input.ts
+// deepFlatMap walks: variants.inventory_items.inventory.location_levels.stock_locations.sales_channels
+// Missing any link in this chain causes "Sales channel X is not associated with any stock location"
 const requiredVariantFieldsForInventoryConfirmation = [
   "id",
   "manage_inventory",
   "allow_backorder",
   "inventory_quantity",
-  "inventory_items.inventory.id",
+  "inventory_items.inventory_item_id",
+  "inventory_items.required_quantity",
   "inventory_items.inventory.location_levels.stocked_quantity",
   "inventory_items.inventory.location_levels.reserved_quantity",
-  "inventory_items.inventory.location_levels.incoming_quantity",
+  "inventory_items.inventory.location_levels.raw_stocked_quantity",
+  "inventory_items.inventory.location_levels.raw_reserved_quantity",
   "inventory_items.inventory.location_levels.location_id",
+  "inventory_items.inventory.location_levels.stock_locations.id",
+  "inventory_items.inventory.location_levels.stock_locations.name",
+  "inventory_items.inventory.location_levels.stock_locations.sales_channels.id",
+  "inventory_items.inventory.location_levels.stock_locations.sales_channels.name",
 ]
 
 type LightweightAddToCartInput = {
