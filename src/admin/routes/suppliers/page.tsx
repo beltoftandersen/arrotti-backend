@@ -36,7 +36,7 @@ const SuppliersListPage = () => {
 
   const loadNotificationSetting = async () => {
     try {
-      const res = await fetch("/admin/store", { credentials: "include" })
+      const res = await fetch("/admin/stores", { credentials: "include" })
       if (res.ok) {
         const data = await res.json()
         const store = data.store ?? data.stores?.[0]
@@ -53,12 +53,12 @@ const SuppliersListPage = () => {
     setNotificationsEnabled(enabled)
     try {
       // Get store ID first
-      const storeRes = await fetch("/admin/store", { credentials: "include" })
+      const storeRes = await fetch("/admin/stores", { credentials: "include" })
       const storeData = await storeRes.json()
       const store = storeData.store ?? storeData.stores?.[0]
       if (!store?.id) return
 
-      await fetch(`/admin/store`, {
+      await fetch(`/admin/stores/${store.id}`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

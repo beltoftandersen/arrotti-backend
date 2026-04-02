@@ -22,7 +22,7 @@ export default async function checkLocalOnlyFitments({ container }: ExecArgs) {
     const { data: products } = await query.graph({
       entity: "product",
       fields: ["id", "title", "categories.id"],
-      filters: { categories: { id: [catId] } },
+      filters: { categories: { id: catId } } as any,
     })
 
     console.log(`Products: ${products.length}`)

@@ -96,10 +96,8 @@ export type InvoiceInput = {
   salesChannelName?: string
   /** QBO Item/Service to use for line items (maps to income account) */
   incomeItemRef?: { value: string; name: string }
-  /** Discount amount (absolute value, not percentage) */
-  discountAmount?: number
-  /** QBO Account to track discounts (e.g., "Discounts given") */
-  discountAccountRef?: { value: string; name: string }
+  /** Discount note to include in PrivateNote (e.g., "Discount: -$5.00") */
+  discountNote?: string
 }
 
 /**
@@ -109,15 +107,20 @@ export async function createInvoice(
   client: QboClient,
   input: InvoiceInput
 ): Promise<QboInvoice> {
+  const taxCodeRef = input.taxAmount && input.taxAmount > 0
+    ? { value: "TAX" }
+    : { value: "NON" }
+
   const lines: Record<string, unknown>[] = input.lines.map((line, index) => ({
     LineNum: index + 1,
     Description: line.sku ? `[${line.sku}] ${line.description}` : line.description,
     Amount: Math.round(line.quantity * line.unitPrice * 100) / 100,
     DetailType: "SalesItemLineDetail" as const,
     SalesItemLineDetail: {
-      ItemRef: input.incomeItemRef, // Links to QBO product/service for income account
+      ItemRef: input.incomeItemRef,
       Qty: line.quantity,
       UnitPrice: line.unitPrice,
+      TaxCodeRef: taxCodeRef,
     },
   }))
 
@@ -132,23 +135,9 @@ export async function createInvoice(
         ItemRef: input.incomeItemRef,
         Qty: 1,
         UnitPrice: input.shippingAmount,
+        TaxCodeRef: taxCodeRef,
       },
     })
-  }
-
-  // Add discount as a DiscountLineDetail if present
-  if (input.discountAmount && input.discountAmount > 0) {
-    const discountLine: Record<string, unknown> = {
-      Amount: input.discountAmount,
-      DetailType: "DiscountLineDetail",
-      DiscountLineDetail: {
-        PercentBased: false,
-      },
-    }
-    if (input.discountAccountRef) {
-      (discountLine.DiscountLineDetail as Record<string, unknown>).DiscountAccountRef = input.discountAccountRef
-    }
-    lines.push(discountLine as any)
   }
 
   const invoiceData: Record<string, unknown> = {
@@ -158,7 +147,7 @@ export async function createInvoice(
     },
     TxnDate: input.orderDate.split("T")[0],
     Line: lines,
-    PrivateNote: `${input.salesChannelName || "Online"} Order: ${input.orderNumber}`,
+    PrivateNote: `${input.salesChannelName || "Online"} Order: ${input.orderNumber}${input.discountNote ? ` | ${input.discountNote}` : ""}`,
     DocNumber: input.orderNumber,
     GlobalTaxCalculation: "TaxExcluded",
   }

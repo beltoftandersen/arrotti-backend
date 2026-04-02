@@ -32,6 +32,17 @@ module.exports = defineConfig({
     },
   },
   modules: [
+    // Redis event bus — durable pub/sub for subscribers (quote notifications, order events, etc.)
+    {
+      resolve: "@medusajs/medusa/event-bus-redis",
+      options: {
+        redisUrl: process.env.REDIS_URL,
+        jobOptions: {
+          removeOnComplete: { age: 3600, count: 1000 },
+          removeOnFail: { age: 3600, count: 1000 },
+        },
+      },
+    },
     // Redis caching module — caches regions, variants, price sets, customers, etc.
     // Significantly speeds up cart operations (v2.11.0+)
     {

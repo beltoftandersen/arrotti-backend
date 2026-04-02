@@ -9,7 +9,7 @@ type QuoteEventData = {
 const STOREFRONT_URL =
   process.env.B2B_STOREFRONT_URL || process.env.STOREFRONT_URL || "http://localhost:8002"
 const DEFAULT_COUNTRY = process.env.DEFAULT_COUNTRY_CODE || "us"
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "orders@arrottigroup.com"
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "webstore@arrottigroup.com"
 
 export default async function quoteNotificationHandler({
   event: { data, name },
@@ -128,7 +128,7 @@ export default async function quoteNotificationHandler({
     if (name === "quote.sent" && customerEmail) {
       // Notify customer that their quote is ready
       const quotedPrice = formatPrice(quote.quoted_price as number, quote.currency_code || "usd")
-      const quotesUrl = `${STOREFRONT_URL}/${DEFAULT_COUNTRY}/account/quotes`
+      const quotesUrl = `${STOREFRONT_URL}/account/quotes`
 
       const html = buildCustomerQuoteSentEmail({
         customerName,
@@ -186,7 +186,7 @@ export default async function quoteNotificationHandler({
 
     if (name === "quote.expired" && customerEmail) {
       // Notify customer that their quote has expired
-      const quotesUrl = `${STOREFRONT_URL}/${DEFAULT_COUNTRY}/account/quotes`
+      const quotesUrl = `${STOREFRONT_URL}/account/quotes`
 
       const html = buildCustomerQuoteExpiredEmail({
         customerName,

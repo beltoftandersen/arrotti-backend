@@ -8,7 +8,7 @@ import { QboClient } from "./qbo-client"
 import { findOrCreateCustomer } from "./qbo-customer"
 import { createInvoice, findInvoiceByOrderNumber, getInvoice, deleteInvoice, voidInvoice } from "./qbo-invoice"
 import { findOrCreateTermByDays } from "./qbo-terms"
-import { findItemByName, findAccountByName } from "./qbo-accounts"
+import { findItemByName } from "./qbo-accounts"
 import { QBO_CONNECTION_MODULE } from "../modules/qbo-connection"
 import QboConnectionService from "../modules/qbo-connection/service"
 
@@ -21,13 +21,6 @@ const SALES_CHANNEL_TO_QBO_ITEM: Record<string, string> = {
   // Add more mappings as needed:
   // "Default Sales Channel": "Ecommerce Sales",
 }
-
-/**
- * QBO account name for tracking discounts/promotions
- * Must match an existing account in QBO (e.g., "Discounts given", "Sales Discounts")
- * Set to null to record discounts without an account reference
- */
-const QBO_DISCOUNT_ACCOUNT: string | null = "Discounts given"
 
 type InvoiceMetadata = {
   connected: boolean
@@ -127,6 +120,9 @@ export async function createQboInvoiceForOrder(
       "discount_total",
       "metadata",
       "items.*",
+      "items.subtotal",
+      "items.discount_total",
+      "items.discount_tax_total",
       "items.variant.sku",
       "items.variant.title",
       "shipping_address.*",
@@ -186,14 +182,28 @@ export async function createQboInvoiceForOrder(
     } : undefined,
   })
 
-  // Build invoice line items
+  // Build invoice line items (use discounted prices so QBO tax is correct)
   const items = order.items || []
-  const lines = items.map((item: any) => ({
-    description: item.title || item.variant?.title || "Product",
-    quantity: toNumber(item.quantity) || 1,
-    unitPrice: toNumber(item.unit_price),
-    sku: item.variant?.sku || item.variant_sku,
-  }))
+  const orderDiscountTotal = toNumber(order.discount_total)
+  const lines = items.map((item: any) => {
+    const qty = toNumber(item.quantity) || 1
+    const itemDiscount = toNumber(item.discount_total)
+    const itemDiscountTax = toNumber(item.discount_tax_total)
+    // subtotal is BEFORE discounts (excl. tax), so subtract the pre-tax discount portion
+    const discountExclTax = itemDiscount - itemDiscountTax
+    const unitPrice = item.subtotal !== undefined && item.subtotal !== null
+      ? Math.round((toNumber(item.subtotal) - discountExclTax) / qty * 100) / 100
+      : toNumber(item.unit_price)
+    const description = item.title || item.variant?.title || "Product"
+    return {
+      description: itemDiscount > 0
+        ? `${description} (discount: -$${itemDiscount.toFixed(2)})`
+        : description,
+      quantity: qty,
+      unitPrice,
+      sku: item.variant?.sku || item.variant_sku,
+    }
+  })
 
   // Look up payment terms - order metadata takes priority over customer metadata
   let salesTermRef: { value: string; name: string } | undefined
@@ -225,17 +235,6 @@ export async function createQboInvoiceForOrder(
     }
   }
 
-  // Look up QBO discount account
-  let discountAccountRef: { value: string; name: string } | undefined
-  if (QBO_DISCOUNT_ACCOUNT && toNumber(order.discount_total) > 0) {
-    discountAccountRef = await findAccountByName(client, QBO_DISCOUNT_ACCOUNT) || undefined
-    if (discountAccountRef) {
-      logger.info(`[QBO Invoice] Using discount account "${QBO_DISCOUNT_ACCOUNT}"`)
-    } else {
-      logger.warn(`[QBO Invoice] Discount account "${QBO_DISCOUNT_ACCOUNT}" not found in QBO`)
-    }
-  }
-
   // Create invoice
   const invoice = await createInvoice(client, {
     customerId: customer.Id,
@@ -263,8 +262,7 @@ export async function createQboInvoiceForOrder(
     salesTermRef,
     salesChannelName: (order as any).sales_channel?.name,
     incomeItemRef,
-    discountAmount: toNumber(order.discount_total),
-    discountAccountRef,
+    discountNote: orderDiscountTotal > 0 ? `Discount: -$${orderDiscountTotal.toFixed(2)}` : undefined,
   })
 
   logger.info(
@@ -322,30 +320,23 @@ export async function recreateQboInvoiceForOrder(
   const orderNumber = order.display_id?.toString() || order.id
   const client = new QboClient(qboConnectionService)
 
-  // Find and delete existing invoice
+  // Find and delete existing invoice (only if unpaid)
   const existingInvoice = await findInvoiceByOrderNumber(client, orderNumber)
   if (existingInvoice) {
     const balance = Number(existingInvoice.Balance) || 0
-    if (balance > 0 && balance < existingInvoice.TotalAmt) {
-      // Partially paid — cannot delete, must void
+    if (balance < existingInvoice.TotalAmt) {
+      // Fully or partially paid — do not touch
       return {
         success: false,
-        message: `Invoice ${existingInvoice.DocNumber} is partially paid ($${balance.toFixed(2)} remaining). Void it manually in QBO first.`,
+        message: `Invoice ${existingInvoice.DocNumber} has payments applied. Cannot recreate a paid or partially paid invoice.`,
       }
     }
 
     try {
-      // Get fresh invoice with SyncToken
+      // Unpaid — safe to delete
       const freshInvoice = await getInvoice(client, existingInvoice.Id)
-      if (balance <= 0) {
-        // Fully paid — void instead of delete
-        await voidInvoice(client, freshInvoice.Id, freshInvoice.SyncToken!)
-        logger.info(`[QBO Invoice] Voided paid invoice ${freshInvoice.DocNumber} for recreate`)
-      } else {
-        // Unpaid — safe to delete
-        await deleteInvoice(client, freshInvoice.Id, freshInvoice.SyncToken!)
-        logger.info(`[QBO Invoice] Deleted invoice ${freshInvoice.DocNumber} for recreate`)
-      }
+      await deleteInvoice(client, freshInvoice.Id, freshInvoice.SyncToken!)
+      logger.info(`[QBO Invoice] Deleted invoice ${freshInvoice.DocNumber} for recreate`)
     } catch (error) {
       return {
         success: false,

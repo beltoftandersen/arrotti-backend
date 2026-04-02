@@ -15,7 +15,6 @@ import {
   PutObjectCommand,
   HeadObjectCommand,
 } from "@aws-sdk/client-s3"
-import { createClient } from "@libsql/client"
 import dotenv from "dotenv"
 import { Pool } from "pg"
 

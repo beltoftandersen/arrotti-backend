@@ -1,5 +1,5 @@
 import { AuthenticatedMedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
+import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { respondToQuoteWorkflow } from "../../../../../workflows/respond-to-quote"
 
 /**
@@ -39,6 +39,12 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
 
   const { result } = await respondToQuoteWorkflow(req.scope).run({
     input: { id, action: "reject" },
+  })
+
+  const eventBus = req.scope.resolve(Modules.EVENT_BUS)
+  await eventBus.emit({
+    name: "quote.rejected",
+    data: { id },
   })
 
   res.json({ quote: result.quote })

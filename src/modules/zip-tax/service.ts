@@ -13,6 +13,11 @@ type InjectedDependencies = {
   logger: Logger
 }
 
+/**
+ * Customer group IDs that are tax exempt (e.g., B2B wholesale customers)
+ */
+const TAX_EXEMPT_CUSTOMER_GROUPS = ["cusgroup_b2b_approved"]
+
 export default class ZipTaxProviderService implements ITaxProvider {
   static identifier = "zip-tax"
 
@@ -67,6 +72,33 @@ export default class ZipTaxProviderService implements ITaxProvider {
     shippingLines: ShippingTaxCalculationLine[],
     context: TaxCalculationContext
   ): Promise<(ItemTaxLineDTO | ShippingTaxLineDTO)[]> {
+    // Check if customer belongs to a tax-exempt group
+    const customerGroups = (context as any).customer?.customer_groups || []
+    if (customerGroups.some((g: string) => TAX_EXEMPT_CUSTOMER_GROUPS.includes(g))) {
+      this.logger_.info(`[zip-tax] Customer is tax exempt (group: ${customerGroups.join(", ")})`)
+      // Return zero-rate lines (not empty) so Medusa marks tax as calculated
+      const zeroLines: (ItemTaxLineDTO | ShippingTaxLineDTO)[] = []
+      for (const l of itemLines) {
+        zeroLines.push({
+          rate: 0,
+          name: "Tax Exempt",
+          code: "TAX-EXEMPT",
+          line_item_id: l.line_item.id,
+          provider_id: this.getIdentifier(),
+        })
+      }
+      for (const l of shippingLines) {
+        zeroLines.push({
+          rate: 0,
+          name: "Tax Exempt",
+          code: "TAX-EXEMPT",
+          shipping_line_id: l.shipping_line.id,
+          provider_id: this.getIdentifier(),
+        })
+      }
+      return zeroLines
+    }
+
     const countryCode = context.address?.country_code?.toLowerCase()
     const postalCode = context.address?.postal_code
     const provinceCode = context.address?.province_code

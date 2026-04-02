@@ -73,6 +73,9 @@ export default async function orderConfirmationHandler({
     const billingAddress = order.billing_address
     const shippingMethods = order.shipping_methods ?? []
 
+    // Detect pickup orders by shipping method name
+    const isPickup = shippingMethods.some((m: any) => m.name === "Arrotti Group")
+
     // Debug logging
     logger.info(`[Order Confirmation] Order ${order.id} - shipping_total: ${order.shipping_total}, tax_total: ${order.tax_total}`)
     logger.info(`[Order Confirmation] Shipping methods: ${JSON.stringify(shippingMethods)}`)
@@ -134,6 +137,76 @@ export default async function orderConfirmationHandler({
       `
     }
 
+    // Order totals table (shared between both email types)
+    const totalsHtml = `
+        <table style="width: 100%; margin-bottom: 30px;">
+          <tr>
+            <td style="padding: 8px 0; color: #666;">Subtotal</td>
+            <td style="padding: 8px 0; text-align: right;">${formatPrice(order.subtotal, order.currency_code)}</td>
+          </tr>
+          ${!isPickup ? `
+          <tr>
+            <td style="padding: 8px 0; color: #666;">Shipping</td>
+            <td style="padding: 8px 0; text-align: right;">${formatPrice(shippingTotal, order.currency_code)}</td>
+          </tr>` : ""}
+          ${order.discount_total ? `
+          <tr>
+            <td style="padding: 8px 0; color: #666;">Discount</td>
+            <td style="padding: 8px 0; text-align: right; color: #10b981;">-${formatPrice(order.discount_total, order.currency_code)}</td>
+          </tr>
+          ` : ""}
+          <tr>
+            <td style="padding: 8px 0; color: #666;">Tax</td>
+            <td style="padding: 8px 0; text-align: right;">${formatPrice(taxTotal, order.currency_code)}</td>
+          </tr>
+          <tr style="font-size: 18px; font-weight: bold;">
+            <td style="padding: 12px 0; border-top: 2px solid #333;">Total</td>
+            <td style="padding: 12px 0; border-top: 2px solid #333; text-align: right;">${formatPrice(order.total, order.currency_code)}</td>
+          </tr>
+        </table>`
+
+    // Pickup-specific sections
+    const pickupInfoHtml = `
+        <div style="background-color: #fff8e1; padding: 20px; border-radius: 8px; border-left: 4px solid #f59e0b; margin-bottom: 20px;">
+          <h3 style="color: #b45309; margin: 0 0 10px;">Pickup Information</h3>
+          <p style="margin: 0 0 8px; color: #666;">
+            <strong>Pickup Location:</strong><br>
+            Arrotti Group<br>
+            4651 36th Street, Suite 500<br>
+            Orlando, FL 32811
+          </p>
+          <p style="margin: 8px 0 0; color: #666;">
+            <strong>Business Hours:</strong><br>
+            Mon–Fri: 8AM – 6PM EST<br>
+            Sat: 9AM – 2PM EST
+          </p>
+        </div>
+
+        <div style="background-color: #f0f7ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h3 style="color: #007ffd; margin: 0 0 10px;">What's Next?</h3>
+          <p style="margin: 0; color: #666;">
+            We're preparing your order for pickup. You'll receive an email or a call when your order is ready to be picked up. Please bring a valid ID and your order number.
+          </p>
+        </div>`
+
+    // Shipping-specific sections
+    const shippingInfoHtml = `
+        <div style="display: flex; gap: 20px; margin-bottom: 30px;">
+          <div style="flex: 1;">
+            <h3 style="color: #333; font-size: 16px; margin-bottom: 10px;">Shipping Address</h3>
+            <p style="color: #666; margin: 0; line-height: 1.8;">
+              ${formatAddress(shippingAddress)}
+            </p>
+          </div>
+        </div>
+
+        <div style="background-color: #f0f7ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h3 style="color: #007ffd; margin: 0 0 10px;">What's Next?</h3>
+          <p style="margin: 0; color: #666;">
+            We're preparing your order for shipment. You'll receive another email with tracking information once your order ships.
+          </p>
+        </div>`
+
     const html = `
       <!DOCTYPE html>
       <html>
@@ -147,7 +220,7 @@ export default async function orderConfirmationHandler({
         </div>
 
         <div style="text-align: center; margin-bottom: 30px;">
-          <h1 style="color: #007ffd; margin-bottom: 10px;">Order Confirmed!</h1>
+          <h1 style="color: #007ffd; margin-bottom: 10px;">${isPickup ? "Order Confirmed — Ready for Pickup!" : "Order Confirmed!"}</h1>
           <p style="color: #666; font-size: 16px;">Thank you for your order</p>
         </div>
 
@@ -159,6 +232,7 @@ export default async function orderConfirmationHandler({
             month: "long",
             day: "numeric"
           })}</p>
+          ${isPickup ? `<p style="margin: 8px 0 0;"><strong>Fulfillment:</strong> In-Store Pickup</p>` : ""}
         </div>
 
         <h2 style="color: #333; font-size: 18px; border-bottom: 2px solid #007ffd; padding-bottom: 10px;">Order Summary</h2>
@@ -175,56 +249,52 @@ export default async function orderConfirmationHandler({
           </tbody>
         </table>
 
-        <table style="width: 100%; margin-bottom: 30px;">
-          <tr>
-            <td style="padding: 8px 0; color: #666;">Subtotal</td>
-            <td style="padding: 8px 0; text-align: right;">${formatPrice(order.subtotal, order.currency_code)}</td>
-          </tr>
-          <tr>
-            <td style="padding: 8px 0; color: #666;">Shipping</td>
-            <td style="padding: 8px 0; text-align: right;">${formatPrice(shippingTotal, order.currency_code)}</td>
-          </tr>
-          ${order.discount_total ? `
-          <tr>
-            <td style="padding: 8px 0; color: #666;">Discount</td>
-            <td style="padding: 8px 0; text-align: right; color: #10b981;">-${formatPrice(order.discount_total, order.currency_code)}</td>
-          </tr>
-          ` : ""}
-          <tr>
-            <td style="padding: 8px 0; color: #666;">Tax</td>
-            <td style="padding: 8px 0; text-align: right;">${formatPrice(taxTotal, order.currency_code)}</td>
-          </tr>
-          <tr style="font-size: 18px; font-weight: bold;">
-            <td style="padding: 12px 0; border-top: 2px solid #333;">Total</td>
-            <td style="padding: 12px 0; border-top: 2px solid #333; text-align: right;">${formatPrice(order.total, order.currency_code)}</td>
-          </tr>
-        </table>
-
-        <div style="display: flex; gap: 20px; margin-bottom: 30px;">
-          <div style="flex: 1;">
-            <h3 style="color: #333; font-size: 16px; margin-bottom: 10px;">Shipping Address</h3>
-            <p style="color: #666; margin: 0; line-height: 1.8;">
-              ${formatAddress(shippingAddress)}
-            </p>
-          </div>
-        </div>
-
-        <div style="background-color: #f0f7ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-          <h3 style="color: #007ffd; margin: 0 0 10px;">What's Next?</h3>
-          <p style="margin: 0; color: #666;">
-            We're preparing your order for shipment. You'll receive another email with tracking information once your order ships.
-          </p>
-        </div>
+        ${totalsHtml}
+        ${isPickup ? pickupInfoHtml : shippingInfoHtml}
 
         <div style="text-align: center; padding-top: 20px; border-top: 1px solid #eee; color: #999; font-size: 14px;">
-          <p>Questions about your order? Contact us at carparts@chimkins.com</p>
+          <p>Questions about your order? Contact us at info@arrottigroup.com</p>
           <p style="margin-top: 10px;">&copy; ${new Date().getFullYear()} Arrotti Group. All rights reserved.</p>
         </div>
       </body>
       </html>
     `
 
-    const text = `
+    const text = isPickup ? `
+ORDER CONFIRMED — READY FOR PICKUP!
+
+Thank you for your order.
+
+Order Number: #${order.display_id || order.id}
+Order Date: ${new Date(order.created_at).toLocaleDateString()}
+Fulfillment: In-Store Pickup
+
+ORDER SUMMARY
+${items.map((item: any) => {
+  const qty = toNumber(item.quantity) || 1
+  const unitPrice = toNumber(item.unit_price)
+  return `- ${qty}x ${item.title} - ${formatPrice(unitPrice * qty, order.currency_code)}`
+}).join("\n")}
+
+Subtotal: ${formatPrice(order.subtotal, order.currency_code)}
+${order.discount_total ? `Discount: -${formatPrice(order.discount_total, order.currency_code)}\n` : ""}Tax: ${formatPrice(taxTotal, order.currency_code)}
+Total: ${formatPrice(order.total, order.currency_code)}
+
+PICKUP LOCATION
+Arrotti Group
+4651 36th Street, Suite 500
+Orlando, FL 32811
+
+Business Hours:
+Mon-Fri: 8AM - 6PM EST
+Sat: 9AM - 2PM EST
+
+We're preparing your order for pickup. You'll receive an email or a call when your order is ready to be picked up. Please bring a valid ID and your order number.
+
+Questions? Contact us at info@arrottigroup.com
+
+© ${new Date().getFullYear()} Arrotti Group. All rights reserved.
+    `.trim() : `
 ORDER CONFIRMED!
 
 Thank you for your order.
@@ -252,7 +322,7 @@ ${shippingAddress.country_code?.toUpperCase() || ""}` : "N/A"}
 
 We're preparing your order for shipment. You'll receive another email with tracking information once your order ships.
 
-Questions? Contact us at carparts@chimkins.com
+Questions? Contact us at info@arrottigroup.com
 
 © ${new Date().getFullYear()} Arrotti Group. All rights reserved.
     `.trim()
@@ -262,7 +332,9 @@ Questions? Contact us at carparts@chimkins.com
       channel: "email",
       template: "order-confirmation",
       data: {
-        subject: `Order Confirmed - #${order.display_id || order.id}`,
+        subject: isPickup
+          ? `Order Confirmed — Ready for Pickup - #${order.display_id || order.id}`
+          : `Order Confirmed - #${order.display_id || order.id}`,
         html,
         text,
       },

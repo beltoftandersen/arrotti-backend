@@ -358,8 +358,6 @@ const QuoteDetailPage = () => {
   )
 }
 
-export const config = defineRouteConfig({
-  label: "Quote Detail",
-})
+export const config = defineRouteConfig({})
 
 export default QuoteDetailPage
