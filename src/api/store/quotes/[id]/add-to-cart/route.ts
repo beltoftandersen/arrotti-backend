@@ -101,6 +101,8 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
   let thumbnail: string | undefined
   let productId: string | undefined = quote.product_id
   let fitmentsJson: string | undefined
+  let partslink: string | undefined
+  let oem: string | undefined
 
   try {
     const { data: variants } = await query.graph({
@@ -112,6 +114,7 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
         "product.id",
         "product.title",
         "product.thumbnail",
+        "product.metadata",
       ],
       filters: { id: quote.variant_id },
     })
@@ -124,6 +127,9 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
         productTitle = (variant as any).product.title || productTitle
         thumbnail = (variant as any).product.thumbnail || undefined
         productId = (variant as any).product.id || productId
+        const productMeta = (variant as any).product.metadata
+        if (productMeta?.partslink_no) partslink = productMeta.partslink_no
+        if (productMeta?.oem && productMeta.oem !== productMeta.partslink_no) oem = productMeta.oem
       }
     }
   } catch (err: any) {
@@ -215,6 +221,8 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
         metadata: {
           quote_id: quote.id,
           ...(fitmentsJson ? { fitments_json: fitmentsJson } : {}),
+          ...(partslink ? { partslink } : {}),
+          ...(oem ? { oem } : {}),
         },
       },
     ])
