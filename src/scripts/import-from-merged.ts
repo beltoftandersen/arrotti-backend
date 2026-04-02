@@ -1534,6 +1534,28 @@ export default async function importFromMerged({ container }: ExecArgs) {
   logger.info(`Errors:              ${errors}`)
 
   // ============================================================
+  // Set CAPA Certified variants to rank first
+  // ============================================================
+  logger.info("\n--- Setting CAPA variant rank ---")
+  try {
+    const rankResult = await medusaPool.query(`
+      UPDATE product_variant pv
+      SET variant_rank = 1
+      FROM product_variant_option pvo
+      JOIN product_option_value pov ON pov.id = pvo.option_value_id
+      JOIN product_option po ON po.id = pov.option_id
+      WHERE pvo.variant_id = pv.id
+        AND po.title = 'Certification'
+        AND pov.value = 'CAPA Certified'
+        AND (pv.variant_rank IS NULL OR pv.variant_rank != 1)
+    `)
+    logger.info(`  Updated ${rankResult.rowCount} CAPA variants to rank 1`)
+  } catch (err: any) {
+    logger.error(`  CAPA rank update failed: ${err.message}`)
+    errors++
+  }
+
+  // ============================================================
   // Reindex Meilisearch
   // ============================================================
   logger.info("\n--- Reindexing Meilisearch ---")
