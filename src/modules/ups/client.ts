@@ -35,58 +35,68 @@ export class UpsClient {
       return this.accessToken
     }
 
-    const credentials = Buffer.from(
-      `${this.options.client_id}:${this.options.client_secret}`
-    ).toString("base64")
+    // Retry once on failure before throwing
+    let lastError: Error | null = null
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const credentials = Buffer.from(
+        `${this.options.client_id}:${this.options.client_secret}`
+      ).toString("base64")
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
 
-    let resp: Response
-    try {
-      resp = await fetch(`${this.baseUrl}/security/v1/oauth/token`, {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          Authorization: `Basic ${credentials}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: "grant_type=client_credentials",
-      })
-    } catch (error: any) {
-      if (error.name === "AbortError") {
-        throw new MedusaError(
-          MedusaError.Types.UNEXPECTED_STATE,
-          "UPS OAuth token request timed out"
-        )
-      }
-      throw error
-    } finally {
-      clearTimeout(timeout)
-    }
-
-    if (!resp.ok) {
-      let detail = `${resp.status} ${resp.statusText}`
+      let resp: Response
       try {
-        const body = await resp.json()
-        if (body?.response?.errors?.length) {
-          detail = body.response.errors
-            .map((e: any) => e.message)
-            .join(", ")
+        resp = await fetch(`${this.baseUrl}/security/v1/oauth/token`, {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            Authorization: `Basic ${credentials}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: "grant_type=client_credentials",
+        })
+      } catch (error: any) {
+        clearTimeout(timeout)
+        if (error.name === "AbortError") {
+          lastError = new MedusaError(
+            MedusaError.Types.UNEXPECTED_STATE,
+            "UPS OAuth token request timed out"
+          )
+          continue
         }
-      } catch {}
-      throw new MedusaError(
-        MedusaError.Types.UNEXPECTED_STATE,
-        `UPS OAuth error: ${detail}`
-      )
+        lastError = error
+        continue
+      } finally {
+        clearTimeout(timeout)
+      }
+
+      if (!resp.ok) {
+        let detail = `${resp.status} ${resp.statusText}`
+        try {
+          const body = await resp.json()
+          if (body?.response?.errors?.length) {
+            detail = body.response.errors
+              .map((e: any) => e.message)
+              .join(", ")
+          }
+        } catch {}
+        lastError = new MedusaError(
+          MedusaError.Types.UNEXPECTED_STATE,
+          `UPS OAuth error: ${detail}`
+        )
+        continue
+      }
+
+      const data: OAuthTokenResponse = await resp.json()
+      this.accessToken = data.access_token
+      const expiresInMs = parseInt(data.expires_in, 10) * 1000
+      this.tokenExpiresAt = Date.now() + expiresInMs - TOKEN_REFRESH_BUFFER_MS
+
+      return this.accessToken
     }
 
-    const data: OAuthTokenResponse = await resp.json()
-    this.accessToken = data.access_token
-    const expiresInMs = parseInt(data.expires_in, 10) * 1000
-    this.tokenExpiresAt = Date.now() + expiresInMs - TOKEN_REFRESH_BUFFER_MS
-
-    return this.accessToken
+    throw lastError!
   }
 
   /**

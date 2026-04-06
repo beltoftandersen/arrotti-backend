@@ -241,10 +241,6 @@ export type ShipmentResponseBody = {
 
 // --- Void ---
 
-export type VoidRequest = {
-  trackingNumber: string
-}
-
 export type VoidResponseBody = {
   VoidShipmentResponse: {
     Response: {

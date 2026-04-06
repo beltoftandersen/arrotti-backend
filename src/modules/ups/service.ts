@@ -9,8 +9,6 @@ import {
   CreateShippingOptionDTO,
   FulfillmentOption,
   OrderLineItemDTO,
-  StockLocationAddressDTO,
-  CartAddressDTO,
 } from "@medusajs/framework/types"
 import { UpsClient } from "./client"
 import {
