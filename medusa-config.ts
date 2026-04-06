@@ -155,7 +155,7 @@ module.exports = defineConfig({
         ],
       },
     },
-    // Fulfillment module with manual + ShipStation providers
+    // Fulfillment module with manual + ShipStation + UPS providers
     {
       resolve: "@medusajs/medusa/fulfillment",
       options: {
@@ -175,6 +175,23 @@ module.exports = defineConfig({
                     api_key: process.env.SHIPSTATION_API_KEY,
                     ...(process.env.SHIPSTATION_BASE_URL && {
                       base_url: process.env.SHIPSTATION_BASE_URL,
+                    }),
+                  },
+                },
+              ]
+            : []),
+          // UPS Direct provider (only enabled when client ID is set)
+          ...(process.env.UPS_CLIENT_ID
+            ? [
+                {
+                  resolve: "./src/modules/ups",
+                  id: "ups",
+                  options: {
+                    client_id: process.env.UPS_CLIENT_ID,
+                    client_secret: process.env.UPS_CLIENT_SECRET,
+                    account_number: process.env.UPS_ACCOUNT_NUMBER,
+                    ...(process.env.UPS_BASE_URL && {
+                      base_url: process.env.UPS_BASE_URL,
                     }),
                   },
                 },
