@@ -239,7 +239,7 @@ If you have any questions, feel free to reach out to us at webstore@arrottigroup
         </div>
 
         <div style="text-align: center; margin: 30px 0;">
-          <a href="https://carparts.chimkins.com/app/customers/${customer.id}"
+          <a href="${B2B_PORTAL_URL}/app/customers/${customer.id}"
              style="display: inline-block; background-color: #007ffd; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">
             View in Admin Panel
           </a>
@@ -278,7 +278,7 @@ Uploaded Documents:
 ${documentsListText}
 
 View in Admin Panel:
-https://carparts.chimkins.com/app/customers/${customer.id}
+${B2B_PORTAL_URL}/app/customers/${customer.id}
 
 To approve this customer, add them to the "B2B Approved" customer group,
 or use the API endpoint: POST /admin/customers/${customer.id}/approve-wholesale
