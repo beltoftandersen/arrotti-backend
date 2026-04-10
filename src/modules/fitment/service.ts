@@ -172,20 +172,26 @@ class FitmentModuleService extends MedusaService({
     )
 
     const fitmentText = vehicles
-      .map((vehicle) => {
+      .flatMap((vehicle) => {
         const make = makeMap.get(vehicle.make_id) ?? ""
         const model = modelMap.get(vehicle.model_id) ?? ""
-        const yearStart = vehicle.year_start ? String(vehicle.year_start) : ""
-        const yearEnd = vehicle.year_end ? String(vehicle.year_end) : ""
+        const yearStart = vehicle.year_start ? Number(vehicle.year_start) : 0
+        const yearEnd = vehicle.year_end ? Number(vehicle.year_end) : 0
 
-        // Format year range: "2018-2021" or just "2018" if same year
-        const yearRange = yearStart === yearEnd
-          ? yearStart
-          : `${yearStart}-${yearEnd}`
+        if (!yearStart) {
+          return [[make, model].filter((v) => v && String(v).trim()).join(" ")]
+        }
 
-        return [yearRange, make, model]
-          .filter((value) => value && String(value).trim())
-          .join(" ")
+        // Expand year range into individual years for searchability
+        const entries: string[] = []
+        for (let year = yearStart; year <= yearEnd; year++) {
+          entries.push(
+            [String(year), make, model]
+              .filter((v) => v && String(v).trim())
+              .join(" ")
+          )
+        }
+        return entries
       })
       .filter(Boolean)
 

@@ -90,7 +90,9 @@ export async function getVehicleInfoBatch(
 
 /**
  * Generate fitment_text array from vehicle IDs.
- * Format: "YEAR_RANGE MAKE MODEL" (e.g., "2018-2021 Toyota Camry" or "2020 Toyota Camry")
+ * Expands year ranges into individual years so each year is a searchable token.
+ * E.g., vehicle with year_start=2018, year_end=2021 produces:
+ *   ["2018 Toyota Camry", "2019 Toyota Camry", "2020 Toyota Camry", "2021 Toyota Camry"]
  */
 export async function generateFitmentText(vehicleIds: string[]): Promise<string[]> {
   const vehicleInfoMap = await getVehicleInfoBatch(vehicleIds)
@@ -99,10 +101,9 @@ export async function generateFitmentText(vehicleIds: string[]): Promise<string[
   for (const id of vehicleIds) {
     const info = vehicleInfoMap.get(id)
     if (info) {
-      const yearRange = info.year_start === info.year_end
-        ? `${info.year_start}`
-        : `${info.year_start}-${info.year_end}`
-      fitmentText.push(`${yearRange} ${info.make} ${info.model}`)
+      for (let year = info.year_start; year <= info.year_end; year++) {
+        fitmentText.push(`${year} ${info.make} ${info.model}`)
+      }
     }
   }
 
