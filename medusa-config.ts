@@ -244,6 +244,7 @@ module.exports = defineConfig({
               "metadata",
               "created_at",
               "categories.id",
+              "categories.handle",
               "categories.parent_category.id",
               "categories.parent_category.parent_category.id",
               "categories.parent_category.parent_category.parent_category.id",
@@ -271,6 +272,19 @@ module.exports = defineConfig({
                 }
               }
               const categoryIds = Array.from(allCategoryIds)
+
+              // Pick the lexicographically smallest leaf category handle.
+              // Partslink numeric prefixes (e.g. 1000-1000, 1000-1025) make
+              // "main" categories sort before supportive ones naturally, so
+              // this doubles as a category-priority tiebreaker downstream.
+              const directCategoryHandles = Array.isArray(product?.categories)
+                ? (product.categories as any[])
+                    .map((c) => c?.handle as string | undefined)
+                    .filter((h): h is string => !!h)
+                : []
+              const primaryCategoryHandle = directCategoryHandles.length > 0
+                ? [...directCategoryHandles].sort()[0]
+                : null
 
               // Extract vehicle_ids, submodels, and conditions from fitments
               const vehicleIds: string[] = []
@@ -399,6 +413,7 @@ module.exports = defineConfig({
               return {
                 ...transformed,
                 category_id: categoryIds.length ? categoryIds : null,
+                primary_category_handle: primaryCategoryHandle,
                 collection_id:
                   product?.collection_id ?? product?.collection?.id ?? null,
                 vehicle_ids: uniqueVehicleIds,
@@ -430,6 +445,7 @@ module.exports = defineConfig({
                 "thumbnail",
                 "fitment_text",
                 "vehicle",
+                "primary_category_handle",
                 "category_id",
                 "collection_id",
                 "vehicle_ids",
@@ -470,12 +486,16 @@ module.exports = defineConfig({
                 "price_cents",
                 "avg_rating",
                 "vehicle_token_count",
+                "primary_category_handle",
               ],
-              // Tiebreaker appended after Meilisearch defaults: when relevance
-              // fully ties (common on parts catalogs with identical titles and
-              // matching fitments), prefer shorter vehicle strings so e.g.
-              // "TOYOTA COROLLA" beats "TOYOTA COROLLA CROSS" on a
-              // "toyota corolla 2022" query.
+              // Tiebreakers appended after Meilisearch defaults:
+              // - vehicle_token_count:asc — shorter vehicle strings win
+              //   ("TOYOTA COROLLA" beats "TOYOTA COROLLA CROSS" on a
+              //   "toyota corolla 2022" query)
+              // - primary_category_handle:asc — Partslink numeric prefixes
+              //   cluster same-category products together and order
+              //   "main" parts (e.g. covers at 1000-1000) above supportive
+              //   parts (retainers at 1000-1031, grilles at 1000-1036)
               rankingRules: [
                 "words",
                 "typo",
@@ -484,6 +504,7 @@ module.exports = defineConfig({
                 "sort",
                 "exactness",
                 "vehicle_token_count:asc",
+                "primary_category_handle:asc",
               ],
             },
             primaryKey: "id",

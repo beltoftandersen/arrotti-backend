@@ -37,10 +37,15 @@ const SORTABLE_ATTRIBUTES = [
   "price_cents",
   "avg_rating",
   "vehicle_token_count",
+  "primary_category_handle",
 ]
 
-// Tiebreaker appended after Meilisearch defaults so equal-score hits prefer
-// shorter vehicle strings (Corolla beats Corolla Cross for a Corolla query).
+// Tiebreakers appended after Meilisearch defaults:
+// - vehicle_token_count:asc — shorter vehicle strings win equal-score ties
+// - primary_category_handle:asc — Partslink numeric prefixes make "main"
+//   categories (e.g. 1000-1000-front-bumper-cover) sort before supportive
+//   ones (1000-1031-front-bumper-cover-retainer), clustering same-category
+//   products together
 const RANKING_RULES = [
   "words",
   "typo",
@@ -49,6 +54,7 @@ const RANKING_RULES = [
   "sort",
   "exactness",
   "vehicle_token_count:asc",
+  "primary_category_handle:asc",
 ]
 
 // Searchable attributes — order matters. Earlier = more weight in Meilisearch's
@@ -485,6 +491,18 @@ export default async function meilisearchReindex({
         )
       )
 
+      // Leaf category handle — min across directly-assigned categories.
+      // Partslink-style numeric prefixes make "main" categories sort before
+      // supportive ones naturally.
+      const directCategoryHandles = Array.isArray(product.categories)
+        ? (product.categories as any[])
+            .map((c) => c?.handle as string | undefined)
+            .filter((h): h is string => !!h)
+        : []
+      const primaryCategoryHandle = directCategoryHandles.length > 0
+        ? [...directCategoryHandles].sort()[0]
+        : null
+
       const brandId = brandByProduct.get(product.id) ?? null
       const salesChannelIds = salesChannelsByProduct.get(product.id) ?? []
 
@@ -510,6 +528,7 @@ export default async function meilisearchReindex({
         thumbnail: product.thumbnail ?? null,
         collection_id: product.collection_id ?? null,
         category_id: categoryIds.length ? categoryIds : null,
+        primary_category_handle: primaryCategoryHandle,
         vehicle_ids: vehicleIds,
         vehicle: vehicleStrings,
         vehicle_token_count: vehicleTokenCount,
