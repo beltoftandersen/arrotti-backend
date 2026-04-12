@@ -38,6 +38,22 @@ const SORTABLE_ATTRIBUTES = [
   "avg_rating",
 ]
 
+// Searchable attributes — order matters. Earlier = more weight in Meilisearch's
+// `attribute` ranking rule. `vehicle` is above `fitment_text` so exact model
+// matches (one entry per fitment) win over year-expanded fitment_text matches
+// (one entry per year) when the query includes a vehicle model name.
+const SEARCHABLE_ATTRIBUTES = [
+  "title",
+  "vehicle",
+  "description",
+  "fitment_text",
+  "oem_number",
+  "partslink_no",
+  "variant_skus",
+  "submodels",
+  "conditions",
+]
+
 export default async function meilisearchReindex({
   container,
 }: {
@@ -91,6 +107,18 @@ export default async function meilisearchReindex({
       }
       if (sortableUpdated) {
         const task = await index.updateSortableAttributes(Array.from(sortable))
+        if (task?.waitTask) {
+          await task.waitTask()
+        }
+      }
+
+      // Ensure searchable attributes match (order matters — this overrides)
+      const currentSearchable = settings.searchableAttributes ?? []
+      const searchableMatch =
+        currentSearchable.length === SEARCHABLE_ATTRIBUTES.length &&
+        currentSearchable.every((attr: string, idx: number) => attr === SEARCHABLE_ATTRIBUTES[idx])
+      if (!searchableMatch) {
+        const task = await index.updateSearchableAttributes(SEARCHABLE_ATTRIBUTES)
         if (task?.waitTask) {
           await task.waitTask()
         }
@@ -407,6 +435,11 @@ export default async function meilisearchReindex({
         }
       })
 
+      // Searchable vehicle strings: one entry per fitment (not year-expanded)
+      const vehicleStrings = structuredFitments
+        .map((f) => f.vehicle)
+        .filter((v): v is string => !!v && v !== "")
+
       // Get all category IDs including ancestors (so product in "Front Bumpers" also appears in "Bumpers")
       const directCategoryIds = Array.isArray(product.categories)
         ? product.categories.map((category) => category?.id).filter(Boolean)
@@ -445,6 +478,7 @@ export default async function meilisearchReindex({
         collection_id: product.collection_id ?? null,
         category_id: categoryIds.length ? categoryIds : null,
         vehicle_ids: vehicleIds,
+        vehicle: vehicleStrings,
         fitment_text: fitmentText,
         submodels: submodels,
         conditions: conditions,

@@ -341,6 +341,15 @@ module.exports = defineConfig({
                 }
               })
 
+              // Searchable per-fitment vehicle strings (one entry per fitment, not
+              // per year). Ranked above fitment_text so exact model matches win —
+              // e.g. query "toyota corolla 2022" prefers "COROLLA" over the
+              // longer "COROLLA CROSS" match despite extra year entries in
+              // fitment_text.
+              const vehicleStrings = structuredFitments
+                .map((f) => f.vehicle)
+                .filter((v): v is string => !!v && v !== "")
+
               // Extract brand info from linked brand
               const brandId = product?.brand?.id ?? null
               const brandName = product?.brand?.name ?? null
@@ -383,6 +392,7 @@ module.exports = defineConfig({
                 collection_id:
                   product?.collection_id ?? product?.collection?.id ?? null,
                 vehicle_ids: uniqueVehicleIds,
+                vehicle: vehicleStrings,
                 fitment_text: fitmentText,
                 submodels: submodels,
                 conditions: conditions,
@@ -400,7 +410,7 @@ module.exports = defineConfig({
               }
             },
             indexSettings: {
-              searchableAttributes: ["title", "description", "fitment_text", "oem_number", "partslink_no", "variant_skus", "submodels", "conditions"],
+              searchableAttributes: ["title", "vehicle", "description", "fitment_text", "oem_number", "partslink_no", "variant_skus", "submodels", "conditions"],
               displayedAttributes: [
                 "id",
                 "handle",
@@ -408,6 +418,7 @@ module.exports = defineConfig({
                 "description",
                 "thumbnail",
                 "fitment_text",
+                "vehicle",
                 "category_id",
                 "collection_id",
                 "vehicle_ids",
