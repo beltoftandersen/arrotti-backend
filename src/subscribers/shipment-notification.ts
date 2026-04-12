@@ -99,6 +99,9 @@ export default async function shipmentNotificationHandler({
     const isPickup = shippingMethods.some((m: any) => m.name === "Arrotti Group")
     const isLocalDelivery = shippingMethods.some((m: any) => m.name === "Free Local Delivery")
 
+    // Pickup orders get notified at fulfillment creation (pickup-ready-notification subscriber)
+    if (isPickup) return
+
     const items = order.items ?? []
     const shippingAddress = order.shipping_address as any
 

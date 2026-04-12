@@ -21,7 +21,7 @@ type CustomerMetadata = {
   registration_source?: string
 }
 
-const ADMIN_EMAIL = process.env.CONTACT_EMAIL || "webstore@arrottigroup.com"
+const ADMIN_EMAIL = process.env.CONTACT_EMAIL || "orders@arrottigroup.com"
 const B2B_PORTAL_URL = process.env.B2B_PORTAL_URL || "https://arrottigroup.com"
 
 /**
@@ -123,7 +123,7 @@ export default async function wholesaleRegistrationHandler({
           </ul>
         </div>
 
-        <p>If you have any questions, feel free to reach out to us at <a href="mailto:webstore@arrottigroup.com" style="color: #007ffd;">webstore@arrottigroup.com</a>.</p>
+        <p>If you have any questions, feel free to reach out to us at <a href="mailto:orders@arrottigroup.com" style="color: #007ffd;">orders@arrottigroup.com</a>.</p>
 
         <div style="text-align: center; padding-top: 20px; border-top: 1px solid #eee; color: #999; font-size: 14px;">
           <p>&copy; ${new Date().getFullYear()} Arrotti Group. All rights reserved.</p>
@@ -151,7 +151,7 @@ What's Next?
 - You'll receive an email once your account is approved
 - After approval, you can log in and start ordering
 
-If you have any questions, feel free to reach out to us at webstore@arrottigroup.com.
+If you have any questions, feel free to reach out to us at orders@arrottigroup.com.
 
 (c) ${new Date().getFullYear()} Arrotti Group. All rights reserved.
     `.trim()

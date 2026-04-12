@@ -60,6 +60,50 @@ function buildShipmentCacheKey(
   return `${carrierId}:${serviceCode}:${postalCode}:${countryCode}`
 }
 
+// In-memory cache for calculated rate results.
+// Avoids redundant ShipStation API calls when calculatePrice is called
+// multiple times for the same carrier+address+items (e.g. once to display
+// prices, again when the shipping method is added to the cart).
+const RATE_RESULT_CACHE_TTL = 15 * 60 * 1000 // 15 minutes
+const RATE_RESULT_CACHE_MAX = 500
+const rateResultCache = new Map<
+  string,
+  { calculated_amount: number; is_tax_inclusive: boolean; timestamp: number }
+>()
+
+function pruneRateResultCache() {
+  const now = Date.now()
+  for (const [key, val] of rateResultCache) {
+    if (now - val.timestamp > RATE_RESULT_CACHE_TTL) {
+      rateResultCache.delete(key)
+    }
+  }
+  if (rateResultCache.size > RATE_RESULT_CACHE_MAX) {
+    const entries = [...rateResultCache.entries()].sort(
+      (a, b) => a[1].timestamp - b[1].timestamp
+    )
+    const toRemove = entries.slice(0, entries.length - RATE_RESULT_CACHE_MAX)
+    for (const [key] of toRemove) {
+      rateResultCache.delete(key)
+    }
+  }
+}
+
+function buildRateResultCacheKey(
+  carrierId: string,
+  serviceCode: string,
+  postalCode: string,
+  countryCode: string,
+  items: Array<{ variant_id?: string | null; quantity: number }>,
+  currencyCode: string
+): string {
+  const itemsKey = items
+    .map((i) => `${i.variant_id ?? "?"}:${i.quantity}`)
+    .sort()
+    .join(",")
+  return `rate:${carrierId}:${serviceCode}:${postalCode}:${countryCode}:${itemsKey}:${currencyCode}`
+}
+
 class ShipStationProviderService extends AbstractFulfillmentProviderService {
   static identifier = "shipstation"
   protected options_: ShipStationOptions
@@ -237,34 +281,78 @@ class ShipStationProviderService extends AbstractFulfillmentProviderService {
       carrier_id: string
       carrier_service_code: string
     }
+
+    const addr = context.shipping_address as any
+    const postalCode: string = addr?.postal_code || ""
+    const countryCode: string = addr?.country_code || ""
+    const currencyCode = context.currency_code as string
+
+    // --- 1. Check rate result cache (instant return) ---
+    if (!shipment_id) {
+      const rateCacheKey = buildRateResultCacheKey(
+        carrier_id,
+        carrier_service_code,
+        postalCode,
+        countryCode,
+        (context.items || []) as Array<{
+          variant_id?: string | null
+          quantity: number
+        }>,
+        currencyCode
+      )
+      const cachedRate = rateResultCache.get(rateCacheKey)
+      if (cachedRate && Date.now() - cachedRate.timestamp < RATE_RESULT_CACHE_TTL) {
+        return {
+          calculated_amount: cachedRate.calculated_amount,
+          is_calculated_price_tax_inclusive: cachedRate.is_tax_inclusive,
+        }
+      }
+    }
+
+    // --- 2. Fetch rate from ShipStation ---
     let rate: Rate | undefined
 
     if (!shipment_id) {
-      const shipment = await this.createShipment({
+      // Check shipment cache — reuse existing shipment_id to avoid
+      // creating a duplicate shipment on ShipStation
+      const shipCacheKey = buildShipmentCacheKey(
         carrier_id,
         carrier_service_code,
-        from_address: {
-          name: context.from_location?.name,
-          address: context.from_location?.address,
-        },
-        to_address: context.shipping_address,
-        items: context.items || [],
-        currency_code: context.currency_code as string,
-      })
-      rate = shipment.rate_response?.rates?.[0]
+        postalCode,
+        countryCode
+      )
+      const cachedShipment = shipmentCache.get(shipCacheKey)
 
-      // Cache shipment_id so validateFulfillmentData can reuse it
-      if (shipment.shipment_id && context.shipping_address) {
-        const addr = context.shipping_address as any
-        const cacheKey = buildShipmentCacheKey(
-          carrier_id, carrier_service_code,
-          addr.postal_code || "", addr.country_code || ""
+      if (
+        cachedShipment &&
+        Date.now() - cachedShipment.timestamp < SHIPMENT_CACHE_TTL
+      ) {
+        const rateResponse = await this.client.getShipmentRates(
+          cachedShipment.shipment_id
         )
-        pruneShipmentCache()
-        shipmentCache.set(cacheKey, {
-          shipment_id: shipment.shipment_id,
-          timestamp: Date.now(),
+        rate = rateResponse?.[0]?.rates?.[0]
+      } else {
+        const shipment = await this.createShipment({
+          carrier_id,
+          carrier_service_code,
+          from_address: {
+            name: context.from_location?.name,
+            address: context.from_location?.address,
+          },
+          to_address: context.shipping_address,
+          items: context.items || [],
+          currency_code: currencyCode,
         })
+        rate = shipment.rate_response?.rates?.[0]
+
+        // Cache shipment_id so validateFulfillmentData can reuse it
+        if (shipment.shipment_id) {
+          pruneShipmentCache()
+          shipmentCache.set(
+            buildShipmentCacheKey(carrier_id, carrier_service_code, postalCode, countryCode),
+            { shipment_id: shipment.shipment_id, timestamp: Date.now() }
+          )
+        }
       }
     } else {
       const rateResponse = await this.client.getShipmentRates(shipment_id)
@@ -278,12 +366,33 @@ class ShipStationProviderService extends AbstractFulfillmentProviderService {
       )
     }
 
+    // --- 3. Compute final price and cache it ---
     const calculatedPrice =
       rate.shipping_amount.amount +
       rate.insurance_amount.amount +
       rate.confirmation_amount.amount +
       rate.other_amount.amount +
       (rate.tax_amount?.amount || 0)
+
+    if (!shipment_id) {
+      const rateCacheKey = buildRateResultCacheKey(
+        carrier_id,
+        carrier_service_code,
+        postalCode,
+        countryCode,
+        (context.items || []) as Array<{
+          variant_id?: string | null
+          quantity: number
+        }>,
+        currencyCode
+      )
+      pruneRateResultCache()
+      rateResultCache.set(rateCacheKey, {
+        calculated_amount: calculatedPrice,
+        is_tax_inclusive: !!rate.tax_amount,
+        timestamp: Date.now(),
+      })
+    }
 
     return {
       calculated_amount: calculatedPrice,

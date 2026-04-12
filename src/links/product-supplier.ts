@@ -29,7 +29,8 @@ export default defineLink({
       cost_price: {
         type: "decimal",
         nullable: true,
-      },
+        columnType: "numeric(10,2)",
+      } as any,
     },
   },
 })

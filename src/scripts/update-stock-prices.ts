@@ -194,15 +194,17 @@ export default async function updateStockPrices({ container }: ExecArgs) {
         errors++
       }
 
-      // Update supplier link
+      // Update supplier link — only if changed
       if (stock.has_ksi && stock.ksi_no) {
         try {
-          await medusaPool.query(
+          const newCost = costPrice > 0 ? costPrice : null
+          const result = await medusaPool.query(
             `UPDATE variant_supplier SET cost_price = $1, stock_qty = $2, supplier_sku = $3, updated_at = NOW()
-             WHERE product_variant_id = $4 AND supplier_id = $5`,
-            [costPrice > 0 ? costPrice : null, qty, stock.ksi_no, v.id, ksiSupplier.id]
+             WHERE product_variant_id = $4 AND supplier_id = $5
+               AND (cost_price IS DISTINCT FROM $1 OR stock_qty IS DISTINCT FROM $2 OR supplier_sku IS DISTINCT FROM $3)`,
+            [newCost, qty, stock.ksi_no, v.id, ksiSupplier.id]
           )
-          updatedSupplier++
+          if (result.rowCount && result.rowCount > 0) updatedSupplier++
         } catch (err: any) {
           if (errors < 10) logger.warn(`  Supplier error ${v.sku}: ${err.message}`)
           errors++

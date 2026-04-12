@@ -9,7 +9,7 @@ type QuoteEventData = {
 const STOREFRONT_URL =
   process.env.B2B_STOREFRONT_URL || process.env.STOREFRONT_URL || "http://localhost:8002"
 const DEFAULT_COUNTRY = process.env.DEFAULT_COUNTRY_CODE || "us"
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "webstore@arrottigroup.com"
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "orders@arrottigroup.com"
 
 export default async function quoteNotificationHandler({
   event: { data, name },

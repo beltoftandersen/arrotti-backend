@@ -10,7 +10,7 @@
 
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
-import { markPaymentCollectionAsPaid, refundPaymentWorkflow } from "@medusajs/medusa/core-flows"
+import { markPaymentCollectionAsPaid, capturePaymentWorkflow, refundPaymentWorkflow } from "@medusajs/medusa/core-flows"
 import {
   verifyWebhookSignature,
   getWebhookVerifierToken,
@@ -230,9 +230,9 @@ async function markMedusaOrderAsPaid(
     return
   }
 
-  // Find a not_paid collection specifically
+  // Find an unpaid collection (not_paid or authorized)
   let unpaidCollection = paymentCollections.find(
-    (pc: any) => pc.status === "not_paid"
+    (pc: any) => pc.status === "not_paid" || pc.status === "authorized"
   )
 
   // If no not_paid collection exists, create one
@@ -274,13 +274,29 @@ async function markMedusaOrderAsPaid(
   }
 
   try {
-    // Mark payment collection as paid
-    await markPaymentCollectionAsPaid(req.scope).run({
-      input: {
-        payment_collection_id: unpaidCollection.id,
-        order_id: order.id,
-      },
-    })
+    if (unpaidCollection.status === "authorized") {
+      // Collection is authorized — capture the existing payment
+      const payment = unpaidCollection.payments?.[0]
+      if (!payment) {
+        logger.error(`[QBO Webhook] Order ${orderNumber} has authorized collection but no payment`)
+        return
+      }
+
+      await capturePaymentWorkflow(req.scope).run({
+        input: {
+          payment_id: payment.id,
+          amount: unpaidCollection.amount,
+        },
+      })
+    } else {
+      // Collection is not_paid — mark as paid
+      await markPaymentCollectionAsPaid(req.scope).run({
+        input: {
+          payment_collection_id: unpaidCollection.id,
+          order_id: order.id,
+        },
+      })
+    }
 
     logger.info(
       `[QBO Webhook] Marked order ${orderNumber} as paid (QBO Payment: ${qboPaymentId})`

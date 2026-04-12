@@ -346,7 +346,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
     const { data: existingProducts } = await query.graph({
       entity: "product",
       fields: [
-        "id", "handle", "title", "metadata",
+        "id", "handle", "title", "metadata", "origin_country",
         "categories.id",
         "variants.id", "variants.sku", "variants.title", "variants.metadata",
         "variants.manage_inventory", "variants.allow_backorder",
@@ -828,9 +828,8 @@ export default async function importFromMerged({ container }: ExecArgs) {
     // ---- Handle EXISTING products (update variants) ----
     for (const { product: existingProduct, group } of existingBatchEntries) {
       try {
-        updatedProducts++
 
-        // Update product title, metadata, category
+        // Update product title, metadata, category — only if changed
         try {
           const categoryId = subCatMap.get(group.ptype)
           const allQuoteOnly = group.variants.every(v => v.is_quote_only)
@@ -851,20 +850,38 @@ export default async function importFromMerged({ container }: ExecArgs) {
             newMetadata.is_quote_only = ""  // empty string removes the key in Medusa
           }
 
-          const updatePayload: any = {
-            title: group.pname,
-            metadata: newMetadata,
-            origin_country: group.origin || undefined,
-          }
+          // Check if anything actually changed
+          let productDirty = false
+          if (existingProduct.title !== group.pname) productDirty = true
+          if ((group.origin || null) !== (existingProduct.origin_country || null)) productDirty = true
 
+          const oldMeta = existingProduct.metadata || {}
+          for (const key of Object.keys(newMetadata)) {
+            if (String(newMetadata[key] ?? "") !== String(oldMeta[key] ?? "")) {
+              productDirty = true
+              break
+            }
+          }
+          let categoryChanged = false
           if (categoryId) {
             const existingCatIds = (existingProduct.categories || []).map((c: any) => c.id)
             if (!existingCatIds.includes(categoryId)) {
-              updatePayload.categories = [{ id: categoryId }]
+              categoryChanged = true
             }
           }
 
-          await productModuleService.updateProducts(existingProduct.id, updatePayload)
+          if (productDirty || categoryChanged) {
+            const updatePayload: any = {
+              title: group.pname,
+              metadata: newMetadata,
+              origin_country: group.origin || undefined,
+            }
+            if (categoryChanged) {
+              updatePayload.categories = [{ id: categoryId }]
+            }
+            await productModuleService.updateProducts(existingProduct.id, updatePayload)
+            updatedProducts++
+          }
         } catch (err: any) {
           if (errors < 5) logger.warn(`  Product update error ${group.base_plink}: ${err.message}`)
           errors++
@@ -978,19 +995,27 @@ export default async function importFromMerged({ container }: ExecArgs) {
             continue
           }
 
-          updatedVariants++
-
-          // Update variant metadata and flags
+          // Update variant metadata and flags — only if changed
           try {
-            await productModuleService.updateProductVariants(matchedVariant.id, {
-              metadata: {
-                ...(matchedVariant.metadata || {}),
-                ksi_no: sourceVariant.ksi_no,
-                hollander_no: group.hollander_no,
-              },
-              manage_inventory: true,
-              allow_backorder: false,
-            })
+            const oldVMeta = matchedVariant.metadata || {}
+            const variantDirty =
+              String(oldVMeta.ksi_no ?? "") !== String(sourceVariant.ksi_no ?? "") ||
+              String(oldVMeta.hollander_no ?? "") !== String(group.hollander_no ?? "") ||
+              matchedVariant.manage_inventory !== true ||
+              matchedVariant.allow_backorder !== false
+
+            if (variantDirty) {
+              await productModuleService.updateProductVariants(matchedVariant.id, {
+                metadata: {
+                  ...(matchedVariant.metadata || {}),
+                  ksi_no: sourceVariant.ksi_no,
+                  hollander_no: group.hollander_no,
+                },
+                manage_inventory: true,
+                allow_backorder: false,
+              })
+              updatedVariants++
+            }
           } catch (err: any) {
             if (errors < 5) logger.warn(`  Variant metadata update error ${sourceVariant.plink}: ${err.message}`)
             errors++
@@ -1347,11 +1372,11 @@ export default async function importFromMerged({ container }: ExecArgs) {
     }
 
     // Progress every 500 products
-    const totalProcessed = createdProducts + updatedProducts
-    if (totalProcessed > 0 && totalProcessed % 500 < BATCH_SIZE) {
+    const totalProcessed = batchStart + batch.length
+    if (totalProcessed % 500 < BATCH_SIZE) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(0)
       const rate = (totalProcessed / ((Date.now() - startTime) / 1000)).toFixed(1)
-      const remaining = productEntries.length - (batchStart + batch.length)
+      const remaining = productEntries.length - totalProcessed
       const eta = (remaining / parseFloat(rate) / 60).toFixed(1)
       logger.info(
         `  Progress: ${totalProcessed}/${productEntries.length} (${rate}/s, ETA ${eta}m) | new: ${createdProducts} | updated: ${updatedProducts} | variants: ${createdVariants}+${updatedVariants} | fitments: ${createdFitments} | errors: ${errors}`
@@ -1475,10 +1500,9 @@ export default async function importFromMerged({ container }: ExecArgs) {
   }
 
   // ============================================================
-  // Cleanup DB connections
+  // Cleanup ksi_data pool (no longer needed)
   // ============================================================
   await pool.end()
-  await medusaPool.end()
 
   // ============================================================
   // Fitment skip summary
@@ -1582,6 +1606,11 @@ export default async function importFromMerged({ container }: ExecArgs) {
     logger.error(`  Category shipping sync failed: ${err.message}`)
     errors++
   }
+
+  // ============================================================
+  // Cleanup Medusa DB connection
+  // ============================================================
+  await medusaPool.end()
 
   // ============================================================
   // Reindex Meilisearch

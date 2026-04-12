@@ -92,7 +92,7 @@ export default async function wholesaleApprovedHandler({
           <h3 style="margin-top: 0; color: #333;">Need Help?</h3>
           <p style="margin: 0; color: #666;">
             Our wholesale support team is here to assist you. Reach out anytime at
-            <a href="mailto:webstore@arrottigroup.com" style="color: #007ffd;">webstore@arrottigroup.com</a>
+            <a href="mailto:orders@arrottigroup.com" style="color: #007ffd;">orders@arrottigroup.com</a>
             or call us at <strong>(407) 286-0498</strong>.
           </p>
         </div>
@@ -132,7 +132,7 @@ What You Can Do Now:
 Log in to your account: ${B2B_PORTAL_URL}/us/login
 
 Need Help?
-Our wholesale support team is here to assist you. Reach out anytime at webstore@arrottigroup.com or call us at (407) 286-0498.
+Our wholesale support team is here to assist you. Reach out anytime at orders@arrottigroup.com or call us at (407) 286-0498.
 
 We're excited to have you as a wholesale partner and look forward to serving your business!
 

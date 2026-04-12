@@ -180,13 +180,6 @@ export default async function orderConfirmationHandler({
             Mon–Fri: 8AM – 6PM EST<br>
             Sat: 9AM – 2PM EST
           </p>
-        </div>
-
-        <div style="background-color: #f0f7ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-          <h3 style="color: #007ffd; margin: 0 0 10px;">What's Next?</h3>
-          <p style="margin: 0; color: #666;">
-            We're preparing your order for pickup. You'll receive an email or a call when your order is ready to be picked up. Please bring a valid ID and your order number.
-          </p>
         </div>`
 
     // Shipping-specific sections
@@ -198,13 +191,6 @@ export default async function orderConfirmationHandler({
               ${formatAddress(shippingAddress)}
             </p>
           </div>
-        </div>
-
-        <div style="background-color: #f0f7ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-          <h3 style="color: #007ffd; margin: 0 0 10px;">What's Next?</h3>
-          <p style="margin: 0; color: #666;">
-            We're preparing your order for shipment. You'll receive another email with tracking information once your order ships.
-          </p>
         </div>`
 
     const html = `
@@ -220,9 +206,25 @@ export default async function orderConfirmationHandler({
         </div>
 
         <div style="text-align: center; margin-bottom: 30px;">
-          <h1 style="color: #007ffd; margin-bottom: 10px;">${isPickup ? "Order Confirmed — Ready for Pickup!" : "Order Confirmed!"}</h1>
+          <h1 style="color: #007ffd; margin-bottom: 10px;">Order Confirmed!</h1>
           <p style="color: #666; font-size: 16px;">Thank you for your order</p>
         </div>
+
+        ${isPickup ? `
+        <div style="background-color: #f0f7ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h3 style="color: #007ffd; margin: 0 0 10px;">What's Next?</h3>
+          <p style="margin: 0; color: #666;">
+            We're preparing your order for pickup. You'll receive an email or a call when your order is ready to be picked up. Please bring a valid ID and your order number.
+          </p>
+        </div>
+        ` : `
+        <div style="background-color: #f0f7ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          <h3 style="color: #007ffd; margin: 0 0 10px;">What's Next?</h3>
+          <p style="margin: 0; color: #666;">
+            We're preparing your order for shipment. You'll receive another email with tracking information once your order ships.
+          </p>
+        </div>
+        `}
 
         <div style="background-color: #f9f9f9; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
           <p style="margin: 0;"><strong>Order Number:</strong> #${order.display_id || order.id}</p>
@@ -232,7 +234,6 @@ export default async function orderConfirmationHandler({
             month: "long",
             day: "numeric"
           })}</p>
-          ${isPickup ? `<p style="margin: 8px 0 0;"><strong>Fulfillment:</strong> In-Store Pickup</p>` : ""}
         </div>
 
         <h2 style="color: #333; font-size: 18px; border-bottom: 2px solid #007ffd; padding-bottom: 10px;">Order Summary</h2>
@@ -261,13 +262,14 @@ export default async function orderConfirmationHandler({
     `
 
     const text = isPickup ? `
-ORDER CONFIRMED — READY FOR PICKUP!
+ORDER CONFIRMED!
 
 Thank you for your order.
 
+We're preparing your order for pickup. You'll receive an email or a call when your order is ready to be picked up. Please bring a valid ID and your order number.
+
 Order Number: #${order.display_id || order.id}
 Order Date: ${new Date(order.created_at).toLocaleDateString()}
-Fulfillment: In-Store Pickup
 
 ORDER SUMMARY
 ${items.map((item: any) => {
@@ -289,8 +291,6 @@ Business Hours:
 Mon-Fri: 8AM - 6PM EST
 Sat: 9AM - 2PM EST
 
-We're preparing your order for pickup. You'll receive an email or a call when your order is ready to be picked up. Please bring a valid ID and your order number.
-
 Questions? Contact us at info@arrottigroup.com
 
 © ${new Date().getFullYear()} Arrotti Group. All rights reserved.
@@ -298,6 +298,8 @@ Questions? Contact us at info@arrottigroup.com
 ORDER CONFIRMED!
 
 Thank you for your order.
+
+We're preparing your order for shipment. You'll receive another email with tracking information once your order ships.
 
 Order Number: #${order.display_id || order.id}
 Order Date: ${new Date(order.created_at).toLocaleDateString()}
@@ -320,8 +322,6 @@ ${shippingAddress.address_1 || ""}
 ${shippingAddress.address_2 ? `${shippingAddress.address_2}\n` : ""}${shippingAddress.city || ""}, ${shippingAddress.province || ""} ${shippingAddress.postal_code || ""}
 ${shippingAddress.country_code?.toUpperCase() || ""}` : "N/A"}
 
-We're preparing your order for shipment. You'll receive another email with tracking information once your order ships.
-
 Questions? Contact us at info@arrottigroup.com
 
 © ${new Date().getFullYear()} Arrotti Group. All rights reserved.
@@ -332,9 +332,7 @@ Questions? Contact us at info@arrottigroup.com
       channel: "email",
       template: "order-confirmation",
       data: {
-        subject: isPickup
-          ? `Order Confirmed — Ready for Pickup - #${order.display_id || order.id}`
-          : `Order Confirmed - #${order.display_id || order.id}`,
+        subject: `Order Confirmed - #${order.display_id || order.id}`,
         html,
         text,
       },

@@ -81,7 +81,7 @@ export default async function wholesaleRejectedHandler({
           <h3 style="color: #007ffd; margin: 0 0 10px;">Questions?</h3>
           <p style="margin: 0; color: #666;">
             Please reach out to our wholesale team at
-            <a href="mailto:webstore@arrottigroup.com" style="color: #007ffd;">webstore@arrottigroup.com</a>
+            <a href="mailto:orders@arrottigroup.com" style="color: #007ffd;">orders@arrottigroup.com</a>
             if you have any questions or would like to discuss this further.
           </p>
         </div>
@@ -114,7 +114,7 @@ Reason: ${reason}
 If you believe this decision was made in error or if you have additional documentation that may support your application, please don't hesitate to contact us. We'd be happy to review any new information.
 
 Questions?
-Please reach out to our wholesale team at webstore@arrottigroup.com if you have any questions or would like to discuss this further.
+Please reach out to our wholesale team at orders@arrottigroup.com if you have any questions or would like to discuss this further.
 
 We appreciate your understanding and wish you the best in your business endeavors.
 
