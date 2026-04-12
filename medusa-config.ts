@@ -377,6 +377,12 @@ module.exports = defineConfig({
                 ? await getProductPriceCents(product.id)
                 : null
 
+              // Count title words for ranking tiebreak — shorter, more generic
+              // titles rank first on equal-score searches.
+              const titleWordCount = typeof product?.title === "string"
+                ? (product.title.trim().split(/\s+/).filter(Boolean).length || 0)
+                : 0
+
               return {
                 ...transformed,
                 category_id: categoryIds.length ? categoryIds : null,
@@ -397,6 +403,7 @@ module.exports = defineConfig({
                 price_cents: priceCents,
                 avg_rating: 0,
                 is_quote_only: !!(product?.metadata as any)?.is_quote_only,
+                title_word_count: titleWordCount,
               }
             },
             indexSettings: {
@@ -424,6 +431,7 @@ module.exports = defineConfig({
                 "price_cents",
                 "avg_rating",
                 "is_quote_only",
+                "title_word_count",
               ],
               filterableAttributes: [
                 "id",
@@ -447,6 +455,21 @@ module.exports = defineConfig({
                 "title",
                 "price_cents",
                 "avg_rating",
+                "title_word_count",
+              ],
+              // Tiebreakers appended after the default rules: when relevance
+              // scores tie (very common on parts catalogs where title + fitment
+              // both match identically), rank by shorter title first, then
+              // alphabetically so identical titles cluster together.
+              rankingRules: [
+                "words",
+                "typo",
+                "proximity",
+                "attribute",
+                "sort",
+                "exactness",
+                "title_word_count:asc",
+                "title:asc",
               ],
             },
             primaryKey: "id",

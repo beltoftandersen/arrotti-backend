@@ -36,6 +36,21 @@ const SORTABLE_ATTRIBUTES = [
   "title",
   "price_cents",
   "avg_rating",
+  "title_word_count",
+]
+
+// Tiebreakers appended after Meilisearch defaults so identical-score hits
+// (common when title + fitment_text both match on a parts catalog) rank by
+// shorter title first, then alphabetically to cluster identical titles.
+const RANKING_RULES = [
+  "words",
+  "typo",
+  "proximity",
+  "attribute",
+  "sort",
+  "exactness",
+  "title_word_count:asc",
+  "title:asc",
 ]
 
 export default async function meilisearchReindex({
@@ -91,6 +106,18 @@ export default async function meilisearchReindex({
       }
       if (sortableUpdated) {
         const task = await index.updateSortableAttributes(Array.from(sortable))
+        if (task?.waitTask) {
+          await task.waitTask()
+        }
+      }
+
+      // Ensure ranking rules — tiebreakers appended to defaults
+      const currentRules = settings.rankingRules ?? []
+      const rulesMatch =
+        currentRules.length === RANKING_RULES.length &&
+        currentRules.every((rule: string, idx: number) => rule === RANKING_RULES[idx])
+      if (!rulesMatch) {
+        const task = await index.updateRankingRules(RANKING_RULES)
         if (task?.waitTask) {
           await task.waitTask()
         }
@@ -436,6 +463,11 @@ export default async function meilisearchReindex({
       const avgRating = ratingByProduct.get(product.id) ?? 0
       const variantSkus = skusByProduct.get(product.id) ?? []
 
+      // Count title words for ranking tiebreak
+      const titleWordCount = typeof product.title === "string"
+        ? (product.title.trim().split(/\s+/).filter(Boolean).length || 0)
+        : 0
+
       return {
         id: product.id,
         title: product.title ?? null,
@@ -458,6 +490,7 @@ export default async function meilisearchReindex({
         price_cents: priceCents,
         avg_rating: avgRating,
         is_quote_only: !!(product.metadata as any)?.is_quote_only,
+        title_word_count: titleWordCount,
       }
     })
 
