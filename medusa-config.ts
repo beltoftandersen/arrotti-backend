@@ -349,6 +349,16 @@ module.exports = defineConfig({
               const vehicleStrings = structuredFitments
                 .map((f) => f.vehicle)
                 .filter((v): v is string => !!v && v !== "")
+              // Min token count across fitments — used as a tiebreaker so the
+              // shorter vehicle string wins on equal-score ties (Corolla with
+              // 4 tokens beats Corolla Cross with 5).
+              const vehicleTokenCount = vehicleStrings.length > 0
+                ? Math.min(
+                    ...vehicleStrings.map(
+                      (v) => v.split(/[\s-]+/).filter(Boolean).length
+                    )
+                  )
+                : 0
 
               // Extract brand info from linked brand
               const brandId = product?.brand?.id ?? null
@@ -393,6 +403,7 @@ module.exports = defineConfig({
                   product?.collection_id ?? product?.collection?.id ?? null,
                 vehicle_ids: uniqueVehicleIds,
                 vehicle: vehicleStrings,
+                vehicle_token_count: vehicleTokenCount,
                 fitment_text: fitmentText,
                 submodels: submodels,
                 conditions: conditions,
@@ -458,6 +469,21 @@ module.exports = defineConfig({
                 "title",
                 "price_cents",
                 "avg_rating",
+                "vehicle_token_count",
+              ],
+              // Tiebreaker appended after Meilisearch defaults: when relevance
+              // fully ties (common on parts catalogs with identical titles and
+              // matching fitments), prefer shorter vehicle strings so e.g.
+              // "TOYOTA COROLLA" beats "TOYOTA COROLLA CROSS" on a
+              // "toyota corolla 2022" query.
+              rankingRules: [
+                "words",
+                "typo",
+                "proximity",
+                "attribute",
+                "sort",
+                "exactness",
+                "vehicle_token_count:asc",
               ],
             },
             primaryKey: "id",

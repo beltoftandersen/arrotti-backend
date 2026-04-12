@@ -36,6 +36,19 @@ const SORTABLE_ATTRIBUTES = [
   "title",
   "price_cents",
   "avg_rating",
+  "vehicle_token_count",
+]
+
+// Tiebreaker appended after Meilisearch defaults so equal-score hits prefer
+// shorter vehicle strings (Corolla beats Corolla Cross for a Corolla query).
+const RANKING_RULES = [
+  "words",
+  "typo",
+  "proximity",
+  "attribute",
+  "sort",
+  "exactness",
+  "vehicle_token_count:asc",
 ]
 
 // Searchable attributes — order matters. Earlier = more weight in Meilisearch's
@@ -119,6 +132,18 @@ export default async function meilisearchReindex({
         currentSearchable.every((attr: string, idx: number) => attr === SEARCHABLE_ATTRIBUTES[idx])
       if (!searchableMatch) {
         const task = await index.updateSearchableAttributes(SEARCHABLE_ATTRIBUTES)
+        if (task?.waitTask) {
+          await task.waitTask()
+        }
+      }
+
+      // Ensure ranking rules match (order matters)
+      const currentRules = settings.rankingRules ?? []
+      const rulesMatch =
+        currentRules.length === RANKING_RULES.length &&
+        currentRules.every((rule: string, idx: number) => rule === RANKING_RULES[idx])
+      if (!rulesMatch) {
+        const task = await index.updateRankingRules(RANKING_RULES)
         if (task?.waitTask) {
           await task.waitTask()
         }
@@ -439,6 +464,14 @@ export default async function meilisearchReindex({
       const vehicleStrings = structuredFitments
         .map((f) => f.vehicle)
         .filter((v): v is string => !!v && v !== "")
+      // Min token count across fitments — tiebreaker for equal-score ties
+      const vehicleTokenCount = vehicleStrings.length > 0
+        ? Math.min(
+            ...vehicleStrings.map(
+              (v) => v.split(/[\s-]+/).filter(Boolean).length
+            )
+          )
+        : 0
 
       // Get all category IDs including ancestors (so product in "Front Bumpers" also appears in "Bumpers")
       const directCategoryIds = Array.isArray(product.categories)
@@ -479,6 +512,7 @@ export default async function meilisearchReindex({
         category_id: categoryIds.length ? categoryIds : null,
         vehicle_ids: vehicleIds,
         vehicle: vehicleStrings,
+        vehicle_token_count: vehicleTokenCount,
         fitment_text: fitmentText,
         submodels: submodels,
         conditions: conditions,
