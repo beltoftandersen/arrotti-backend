@@ -7,6 +7,7 @@ import { PencilSquare } from "@medusajs/icons"
 const PAYMENT_TERMS_OPTIONS = [
   { value: "none", label: "No payment terms" },
   { value: "0", label: "Due on receipt" },
+  { value: "7", label: "Net 7" },
   { value: "15", label: "Net 15" },
   { value: "30", label: "Net 30" },
   { value: "45", label: "Net 45" },
@@ -16,6 +17,7 @@ const PAYMENT_TERMS_OPTIONS = [
 
 const PAYMENT_TERMS_LABELS: Record<number, string> = {
   0: "Due on receipt",
+  7: "Net 7",
   15: "Net 15",
   30: "Net 30",
   45: "Net 45",

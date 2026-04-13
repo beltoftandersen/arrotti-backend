@@ -10,6 +10,7 @@ type PaymentTermsOption = {
 
 const PAYMENT_TERMS_OPTIONS: PaymentTermsOption[] = [
   { value: 0, label: "Due on receipt" },
+  { value: 7, label: "Net 7" },
   { value: 15, label: "Net 15" },
   { value: 30, label: "Net 30" },
   { value: 45, label: "Net 45" },

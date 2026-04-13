@@ -6,7 +6,8 @@
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { QboClient } from "./qbo-client"
 import { findOrCreateCustomer } from "./qbo-customer"
-import { createInvoice, findInvoiceByOrderNumber, getInvoice, deleteInvoice, voidInvoice } from "./qbo-invoice"
+import { createInvoice, getInvoice, deleteInvoice, voidInvoice } from "./qbo-invoice"
+import type { QboInvoice } from "./qbo-invoice"
 import { findOrCreateTermByDays } from "./qbo-terms"
 import { findItemByName } from "./qbo-accounts"
 import { QBO_CONNECTION_MODULE } from "../modules/qbo-connection"
@@ -62,6 +63,24 @@ async function saveInvoiceToOrderMetadata(
   } catch (error) {
     console.error("[QBO] Failed to save invoice metadata:", error)
     // Don't throw - this is a nice-to-have feature
+  }
+}
+
+/**
+ * Look up an existing QBO invoice for a Medusa order using the invoice_id
+ * saved in order.metadata.qbo_invoice. Returns null if no id is stored or
+ * the invoice no longer exists in QBO (e.g. deleted from the QB UI).
+ */
+async function getQboInvoiceFromOrderMetadata(
+  orderMetadata: Record<string, any> | null | undefined,
+  client: QboClient
+): Promise<QboInvoice | null> {
+  const invoiceId = orderMetadata?.qbo_invoice?.invoice_id
+  if (!invoiceId) return null
+  try {
+    return await getInvoice(client, invoiceId)
+  } catch {
+    return null
   }
 }
 
@@ -149,13 +168,16 @@ export async function createQboInvoiceForOrder(
   // Create QBO client
   const client = new QboClient(qboConnectionService)
 
-  // Use display_id as order number (falls back to id)
+  // Use display_id for logging/PrivateNote only (QBO will auto-assign DocNumber)
   const orderNumber = order.display_id?.toString() || order.id
 
-  // Check if invoice already exists (idempotency)
-  const existingInvoice = await findInvoiceByOrderNumber(client, orderNumber)
+  // Idempotency: look up the QBO invoice via the id we previously stored in order metadata
+  const existingInvoice = await getQboInvoiceFromOrderMetadata(
+    order.metadata as Record<string, any> | null | undefined,
+    client
+  )
   if (existingInvoice) {
-    logger.info(`[QBO Invoice] Invoice already exists for order ${orderNumber}`)
+    logger.info(`[QBO Invoice] Invoice already exists for order ${orderNumber} (QBO DocNumber ${existingInvoice.DocNumber})`)
     return {
       success: true,
       alreadyExists: true,
@@ -305,11 +327,11 @@ export async function recreateQboInvoiceForOrder(
     return { success: false, message: "QuickBooks is not connected" }
   }
 
-  // Get order display_id
+  // Get order display_id + metadata (for stored invoice id)
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
   const { data: [order] } = await query.graph({
     entity: "order",
-    fields: ["id", "display_id"],
+    fields: ["id", "display_id", "metadata"],
     filters: { id: orderId },
   })
 
@@ -320,8 +342,11 @@ export async function recreateQboInvoiceForOrder(
   const orderNumber = order.display_id?.toString() || order.id
   const client = new QboClient(qboConnectionService)
 
-  // Find and delete existing invoice (only if unpaid)
-  const existingInvoice = await findInvoiceByOrderNumber(client, orderNumber)
+  // Find and delete existing invoice (only if unpaid) — resolved via stored invoice id
+  const existingInvoice = await getQboInvoiceFromOrderMetadata(
+    order.metadata as Record<string, any> | null | undefined,
+    client
+  )
   if (existingInvoice) {
     const balance = Number(existingInvoice.Balance) || 0
     if (balance < existingInvoice.TotalAmt) {

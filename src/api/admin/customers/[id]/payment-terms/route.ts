@@ -8,7 +8,7 @@ import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 
 // Valid payment term options (in days)
-const VALID_PAYMENT_TERMS = [0, 15, 30, 45, 60, 90]
+const VALID_PAYMENT_TERMS = [0, 7, 15, 30, 45, 60, 90]
 
 /**
  * GET /admin/customers/:id/payment-terms

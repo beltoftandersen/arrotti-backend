@@ -1,5 +1,5 @@
 import { SubscriberArgs, type SubscriberConfig } from "@medusajs/framework"
-import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
+import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { h } from "../lib/html-escape"
 
 type WholesaleApprovedData = {
@@ -45,6 +45,17 @@ export default async function wholesaleApprovedHandler({
     if (!customer.email) {
       logger.warn(`[Wholesale Approved] Customer ${data.id} has no email`)
       return
+    }
+
+    const currentMetadata = (customer.metadata as Record<string, unknown>) || {}
+    if (currentMetadata.payment_terms_days === undefined) {
+      const customerService = container.resolve(Modules.CUSTOMER)
+      await customerService.updateCustomers(customer.id, {
+        metadata: { ...currentMetadata, payment_terms_days: 0 },
+      })
+      logger.info(
+        `[Wholesale Approved] Set default payment terms "Due on receipt" for customer ${customer.id}`
+      )
     }
 
     const customerName = `${customer.first_name || ""} ${customer.last_name || ""}`.trim() || "Customer"

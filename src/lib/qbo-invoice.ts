@@ -52,13 +52,6 @@ type QboInvoiceResponse = {
   Invoice: QboInvoice
 }
 
-type QboQueryResponse = {
-  QueryResponse: {
-    Invoice?: QboInvoice[]
-    maxResults?: number
-  }
-}
-
 export type InvoiceLineInput = {
   description: string
   quantity: number
@@ -148,7 +141,6 @@ export async function createInvoice(
     TxnDate: input.orderDate.split("T")[0],
     Line: lines,
     PrivateNote: `${input.salesChannelName || "Online"} Order: ${input.orderNumber}${input.discountNote ? ` | ${input.discountNote}` : ""}`,
-    DocNumber: input.orderNumber,
     GlobalTaxCalculation: "TaxExcluded",
   }
 
@@ -195,24 +187,6 @@ export async function createInvoice(
   const response = await client.post<QboInvoiceResponse>("invoice", invoiceData)
   console.log(`[QBO] Created invoice ${response.Invoice.DocNumber} (ID: ${response.Invoice.Id})`)
   return response.Invoice
-}
-
-/**
- * Find an invoice by order number (DocNumber)
- */
-export async function findInvoiceByOrderNumber(
-  client: QboClient,
-  orderNumber: string
-): Promise<QboInvoice | null> {
-  const query = `SELECT * FROM Invoice WHERE DocNumber = '${orderNumber.replace(/'/g, "\\'")}'`
-
-  const response = await client.query<QboQueryResponse>(query)
-
-  if (response.QueryResponse.Invoice && response.QueryResponse.Invoice.length > 0) {
-    return response.QueryResponse.Invoice[0]
-  }
-
-  return null
 }
 
 /**

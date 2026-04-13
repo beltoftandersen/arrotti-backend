@@ -6,7 +6,7 @@
 import { SubscriberArgs, type SubscriberConfig } from "@medusajs/framework"
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import { QboClient } from "../lib/qbo-client"
-import { findInvoiceByOrderNumber } from "../lib/qbo-invoice"
+import { getInvoice } from "../lib/qbo-invoice"
 import { createPayment, paymentExistsForInvoice } from "../lib/qbo-payment"
 import { findAccountByName } from "../lib/qbo-accounts"
 import { QBO_CONNECTION_MODULE } from "../modules/qbo-connection"
@@ -50,6 +50,7 @@ export default async function qboPaymentHandler({
         "provider_id",
         "payment_collection.order.id",
         "payment_collection.order.display_id",
+        "payment_collection.order.metadata",
         "payment_collection.order.sales_channel.name",
       ],
       filters: { id: data.id },
@@ -69,13 +70,20 @@ export default async function qboPaymentHandler({
 
     const orderNumber = order.display_id?.toString() || order.id
 
-    // Create QBO client
+    // Resolve the QBO invoice via the id stored on the order when we created it
+    const qboInvoiceId = order.metadata?.qbo_invoice?.invoice_id as string | undefined
+    if (!qboInvoiceId) {
+      logger.debug(`[QBO Payment] No QBO invoice id on order ${orderNumber} metadata, skipping`)
+      return
+    }
+
     const client = new QboClient(qboConnectionService)
 
-    // Find the invoice in QBO
-    const invoice = await findInvoiceByOrderNumber(client, orderNumber)
-    if (!invoice) {
-      logger.debug(`[QBO Payment] No invoice found for order ${orderNumber}, skipping`)
+    let invoice
+    try {
+      invoice = await getInvoice(client, qboInvoiceId)
+    } catch (err) {
+      logger.warn(`[QBO Payment] Stored invoice ${qboInvoiceId} for order ${orderNumber} not retrievable from QBO: ${(err as Error).message}`)
       return
     }
 

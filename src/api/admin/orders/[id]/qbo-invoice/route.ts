@@ -7,7 +7,7 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { createQboInvoiceForOrder, recreateQboInvoiceForOrder } from "../../../../../lib/qbo-invoice-creator"
 import { QboClient } from "../../../../../lib/qbo-client"
-import { findInvoiceByOrderNumber } from "../../../../../lib/qbo-invoice"
+import { getInvoice } from "../../../../../lib/qbo-invoice"
 import { QBO_CONNECTION_MODULE } from "../../../../../modules/qbo-connection"
 import QboConnectionService from "../../../../../modules/qbo-connection/service"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
@@ -78,11 +78,11 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
       return res.json(result)
     }
 
-    // Get order to find display_id
+    // Get order with metadata (to read stored QBO invoice id)
     const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
     const { data: [order] } = await query.graph({
       entity: "order",
-      fields: ["id", "display_id"],
+      fields: ["id", "display_id", "metadata"],
       filters: { id: orderId },
     })
 
@@ -90,11 +90,17 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    const orderNumber = order.display_id?.toString() || order.id
-
-    // Check if invoice exists
+    // Resolve the QBO invoice via the id stored on the order when we created it
+    const storedInvoiceId = (order.metadata as Record<string, any> | null | undefined)?.qbo_invoice?.invoice_id as string | undefined
     const client = new QboClient(qboConnectionService)
-    const existingInvoice = await findInvoiceByOrderNumber(client, orderNumber)
+    let existingInvoice: Awaited<ReturnType<typeof getInvoice>> | null = null
+    if (storedInvoiceId) {
+      try {
+        existingInvoice = await getInvoice(client, storedInvoiceId)
+      } catch {
+        existingInvoice = null
+      }
+    }
 
     const lastChecked = new Date().toISOString()
 

@@ -25,6 +25,7 @@ type QboQueryResponse = {
 // Standard payment term names in QuickBooks
 export const PAYMENT_TERMS = {
   DUE_ON_RECEIPT: "Due on receipt",
+  NET_7: "Net 7", // May need to be created
   NET_15: "Net 15",
   NET_30: "Net 30",
   NET_45: "Net 45", // May need to be created
@@ -35,6 +36,7 @@ export const PAYMENT_TERMS = {
 // Map days to term names
 export const DAYS_TO_TERM_NAME: Record<number, string> = {
   0: "Due on receipt",
+  7: "Net 7",
   15: "Net 15",
   30: "Net 30",
   45: "Net 45",
