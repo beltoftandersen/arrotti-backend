@@ -230,9 +230,16 @@ export async function POST(
           email: emailLc,
           company_name: body.company_name || null,
           phone: body.phone || null,
-          has_account: true,
           metadata: mergedMetadata,
-        } as any
+        }
+      )
+
+      // updateCustomers' DTO does not expose has_account, so flip it
+      // explicitly via raw SQL. Required for the partial unique index
+      // and any downstream "is registered" checks to recognize the row.
+      await db.raw(
+        `UPDATE customer SET has_account = true, updated_at = NOW() WHERE id = ?`,
+        [guestRow.id]
       )
 
       const authModuleForLink = req.scope.resolve(Modules.AUTH)
