@@ -12,11 +12,18 @@
 
 **Working directory:** `/var/www/arrotti/my-medusa-store`
 
-**⚠ Production-database execution (option C).** `.env.test` is empty; integration tests run against the live Postgres instance. All test rows use the prefix
-`__test_uniqueness_` in emails and ids, and every test file ships with
-`beforeAll`/`afterAll` teardown hooks that delete any row whose email starts
-with that prefix. Prod data never shares that pattern, so a failed teardown
-still never touches real customers.
+**Test approach (revised).** Original plan included an integration-test suite,
+but two test-infra blockers (axios `validateStatus` defaults + missing
+publishable-API-key middleware in the harness) made the cost-benefit unfavorable
+for this feature. Verification is **manual smoke test** in Task 3 (curl against
+the live route after deploy). The DB-level partial unique index from Task 1 is
+the durable safety net — application drift cannot defeat it. Test infra
+prerequisites (`.env.test` with `DB_USERNAME/PASSWORD/HOST`, `medusa` role
+`CREATEDB` grant) are left in place for whenever a real test suite is added
+later.
+
+**Binding syntax.** `db.raw()` is Knex, so raw SQL uses `?` positional
+placeholders with an array of bindings (not Postgres-native `$1`).
 
 ---
 
@@ -26,7 +33,6 @@ still never touches real customers.
 |---|---|---|
 | `src/scripts/add-customer-email-uniqueness-index.ts` | Create | One-off migration: pre-flight checks for duplicates, creates the partial unique index concurrently, verifies creation. Run via `npx medusa exec`. |
 | `src/api/store/customers/register-wholesale/route.ts` | Modify | Normalize email, case-insensitive lookup via raw SQL, branch into upgrade-in-place vs create-new. Catch unique-index violations on the create path. |
-| `integration-tests/http/register-wholesale-uniqueness.spec.ts` | Create | Four integration tests driven through the HTTP surface: new email, registered-email rejection (case variant), guest upgrade in place, unique-violation race caught gracefully. |
 
 ---
 
@@ -136,189 +142,32 @@ git commit -m "feat(db): partial unique index on customer email for has_account=
 
 ---
 
-## Task 2: Scaffold the integration test file
-
-**Files:**
-- Create: `integration-tests/http/register-wholesale-uniqueness.spec.ts`
-
-- [ ] **Step 1: Create the test file with boilerplate and a smoke test**
-
-Create `/var/www/arrotti/my-medusa-store/integration-tests/http/register-wholesale-uniqueness.spec.ts`:
-
-```ts
-import { medusaIntegrationTestRunner } from "@medusajs/test-utils"
-import { Modules } from "@medusajs/framework/utils"
-
-jest.setTimeout(120 * 1000)
-
-/**
- * Prefix applied to every email and customer id this test file creates.
- * The afterAll hook hard-deletes any row matching this pattern, so the
- * test file is safe to run against the production database.
- */
-const TEST_PREFIX = "__test_uniqueness_"
-
-function testEmail(tag: string): string {
-  return `${TEST_PREFIX}${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}@example.com`
-}
-
-medusaIntegrationTestRunner({
-  inApp: true,
-  env: {},
-  testSuite: ({ api, getContainer }) => {
-    describe("POST /store/customers/register-wholesale — uniqueness", () => {
-      const baseBody = {
-        password: "StrongPass1!",
-        first_name: "Test",
-        last_name: "User",
-      }
-
-      async function countCustomers(emailLower: string) {
-        const container = getContainer()
-        const db = container.resolve("__pg_connection__")
-        const { rows } = await db.raw(
-          `SELECT COUNT(*)::int AS n FROM customer
-           WHERE LOWER(email) = $1 AND deleted_at IS NULL`,
-          [emailLower]
-        )
-        return rows[0].n as number
-      }
-
-      async function teardownTestData() {
-        const container = getContainer()
-        const db = container.resolve("__pg_connection__")
-        // Remove auth/provider rows first (FK-safe); then customers.
-        await db.raw(
-          `DELETE FROM provider_identity WHERE entity_id LIKE $1`,
-          [`${TEST_PREFIX}%`]
-        )
-        await db.raw(
-          `DELETE FROM auth_identity
-             WHERE id NOT IN (SELECT auth_identity_id FROM provider_identity WHERE auth_identity_id IS NOT NULL)
-               AND app_metadata::text LIKE $1`,
-          [`%${TEST_PREFIX}%`]
-        )
-        await db.raw(
-          `DELETE FROM customer_group_customer
-             WHERE customer_id IN (SELECT id FROM customer WHERE email LIKE $1)`,
-          [`${TEST_PREFIX}%`]
-        )
-        await db.raw(
-          `DELETE FROM customer WHERE email LIKE $1 OR id LIKE $2`,
-          [`${TEST_PREFIX}%`, `cus_${TEST_PREFIX}%`]
-        )
-      }
-
-      beforeAll(async () => {
-        await teardownTestData()
-      })
-
-      afterAll(async () => {
-        await teardownTestData()
-      })
-
-      it("smoke: runner boots and route is reachable", async () => {
-        const res = await api.post(
-          "/store/customers/register-wholesale",
-          { ...baseBody, email: testEmail("smoke") }
-        )
-        // Either 201 or a validation-ish error proves the route is mounted.
-        expect([201, 400, 409]).toContain(res.status)
-      })
-    })
-  },
-})
-```
-
-Note: `"__pg_connection__"` is the container registration key for Knex; it is
-equivalent to `ContainerRegistrationKeys.PG_CONNECTION` (both resolve to the
-same token).
-
-- [ ] **Step 2: Run the new test file**
-
-```bash
-cd /var/www/arrotti/my-medusa-store
-npm run test:integration:http -- --testPathPattern=register-wholesale-uniqueness
-```
-
-Expected: smoke test passes, runner bootstraps the in-app Medusa server.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add integration-tests/http/register-wholesale-uniqueness.spec.ts
-git commit -m "test(register-wholesale): scaffold uniqueness integration test"
-```
-
----
-
-## Task 3: Red test — case-variant registered email must 409
-
-**Files:**
-- Modify: `integration-tests/http/register-wholesale-uniqueness.spec.ts`
-
-- [ ] **Step 1: Add a failing test for case-insensitive block**
-
-Inside the `describe` block, immediately after the smoke `it(...)` test, add:
-
-```ts
-it("rejects re-registration with a different casing of an existing registered email", async () => {
-  const email = testEmail("case")
-
-  const first = await api.post("/store/customers/register-wholesale", {
-    ...baseBody,
-    email,
-  })
-  expect(first.status).toBe(201)
-
-  const second = await api.post("/store/customers/register-wholesale", {
-    ...baseBody,
-    email: email.toUpperCase(),
-  })
-  expect(second.status).toBe(409)
-  expect(await countCustomers(email.toLowerCase())).toBe(1)
-})
-```
-
-- [ ] **Step 2: Run and confirm it fails**
-
-```bash
-npm run test:integration:http -- --testPathPattern=register-wholesale-uniqueness \
-  -t "rejects re-registration with a different casing"
-```
-
-Expected: FAIL. Reason: current route compares emails case-sensitively via
-`listCustomers({ email })`, so the uppercased address is treated as a new
-customer and either returns 201 (creating a second row) or 409 via the auth
-conflict rather than the customer conflict.
-
-- [ ] **Step 3: Commit the red test**
-
-```bash
-git add integration-tests/http/register-wholesale-uniqueness.spec.ts
-git commit -m "test(register-wholesale): red — case-variant email must 409"
-```
-
----
-
-## Task 4: Green — normalize email, case-insensitive lookup via raw SQL
+## Task 2: Modify the wholesale registration route
 
 **Files:**
 - Modify: `src/api/store/customers/register-wholesale/route.ts`
 
-- [ ] **Step 1: Add the PG connection import and email normalization**
+This single task replaces the original Tasks 2–7 (integration tests and TDD red/green cycles) per the Path B pivot: no automated tests, manual smoke verification in Task 3.
 
-At the top of `/var/www/arrotti/my-medusa-store/src/api/store/customers/register-wholesale/route.ts`, update the imports to include `ContainerRegistrationKeys`:
+- [ ] **Step 1: Add `ContainerRegistrationKeys` to imports**
+
+In `route.ts`, change the existing imports line from:
 
 ```ts
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 ```
 
-(`Modules` is already imported; just add `ContainerRegistrationKeys` to the same line.)
+to (no change — `ContainerRegistrationKeys` is already imported in this codebase per Task 1's pattern; if for some reason only `Modules` is imported, add `ContainerRegistrationKeys`).
+
+Verify the import line exists. If you need to add it:
+
+```ts
+import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
+```
 
 - [ ] **Step 2: Replace the lookup block**
 
-Find the existing block in `route.ts` (around lines 141–150):
+Locate the block (currently around lines 141–150):
 
 ```ts
     // 2. Check if customer with this email already exists
@@ -333,11 +182,11 @@ Find the existing block in `route.ts` (around lines 141–150):
     }
 ```
 
-Replace it with:
+Replace with:
 
 ```ts
-    // Normalise email and look up any existing rows case-insensitively.
-    // Raw SQL keeps semantics identical to the partial unique index
+    // Normalize email and look up existing rows case-insensitively via
+    // raw SQL — same semantics as the partial unique index
     // (LOWER(email) WHERE has_account = true AND deleted_at IS NULL).
     const emailLc = body.email.trim().toLowerCase()
 
@@ -348,7 +197,7 @@ Replace it with:
       `SELECT id, email, has_account, first_name, last_name,
               company_name, phone, metadata, created_at
          FROM customer
-        WHERE LOWER(email) = $1 AND deleted_at IS NULL
+        WHERE LOWER(email) = ? AND deleted_at IS NULL
         ORDER BY created_at ASC`,
       [emailLc]
     )
@@ -364,29 +213,9 @@ Replace it with:
     const guestRow = existingRows.find((r: any) => r.has_account === false)
 ```
 
-Keep the rest of the function intact for now — `guestRow` will be used in Task 6.
+- [ ] **Step 3: Normalize email at the auth-register call**
 
-- [ ] **Step 3: Normalize email on write**
-
-Find the `customerData` object (about 25 lines further down, still inside the
-same function):
-
-```ts
-    const customerData = {
-      first_name: body.first_name,
-      last_name: body.last_name,
-      email: body.email,
-      company_name: body.company_name || null,
-```
-
-Change the `email:` line to use `emailLc`:
-
-```ts
-      email: emailLc,
-```
-
-Also update the auth register call (around line 159) so the stored auth entity
-matches:
+Around line 159 (auth register call), change `email: body.email` to `email: emailLc`:
 
 ```ts
       authResult = await authModule.register("emailpass", {
@@ -397,105 +226,53 @@ matches:
       } as any)
 ```
 
-- [ ] **Step 4: Run the red test — it should now pass**
+- [ ] **Step 4: Replace the customer-creation block with the upgrade-or-create branch**
 
-```bash
-npm run test:integration:http -- --testPathPattern=register-wholesale-uniqueness \
-  -t "rejects re-registration with a different casing"
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/api/store/customers/register-wholesale/route.ts
-git commit -m "feat(register-wholesale): case-insensitive email dedupe via raw SQL"
-```
-
----
-
-## Task 5: Red test — guest row must be upgraded in place
-
-**Files:**
-- Modify: `integration-tests/http/register-wholesale-uniqueness.spec.ts`
-
-- [ ] **Step 1: Add a failing test for guest upgrade**
-
-Append to the same `describe` block:
+Locate the block starting at "// 4. Create customer account linked to auth identity" (around line 185) through the existing `res.status(201).json({...})` and `return` at the end of the try-block (around line 223). The whole sequence to replace is:
 
 ```ts
-it("upgrades an existing guest customer in place instead of creating a duplicate", async () => {
-  const email = testEmail("guest")
-  const container = getContainer()
-  const customerModule = container.resolve(Modules.CUSTOMER)
-
-  const [guest] = await customerModule.createCustomers([
-    {
-      email,
-      has_account: false,
-      first_name: "Guest",
-      last_name: "Shopper",
-    },
-  ])
-
-  expect(guest.has_account).toBe(false)
-
-  const res = await api.post("/store/customers/register-wholesale", {
-    ...baseBody,
-    email,
-    company_name: "Upgrade Co",
-  })
-  expect(res.status).toBe(201)
-  expect(await countCustomers(email.toLowerCase())).toBe(1)
-
-  const refreshed = await customerModule.retrieveCustomer(guest.id)
-  expect(refreshed.has_account).toBe(true)
-  expect(refreshed.company_name).toBe("Upgrade Co")
-})
-```
-
-- [ ] **Step 2: Run and confirm it fails**
-
-```bash
-npm run test:integration:http -- --testPathPattern=register-wholesale-uniqueness \
-  -t "upgrades an existing guest customer"
-```
-
-Expected: FAIL. Reason: the route currently has no branch that handles a guest
-row — after Task 4 the guest row is found but nothing is done with it, so
-`createCustomerAccountWorkflow` runs and creates a second row (count becomes 2).
-
-- [ ] **Step 3: Commit the red test**
-
-```bash
-git add integration-tests/http/register-wholesale-uniqueness.spec.ts
-git commit -m "test(register-wholesale): red — guest upgrade in place"
-```
-
----
-
-## Task 6: Green — upgrade guest in place, link auth identity
-
-**Files:**
-- Modify: `src/api/store/customers/register-wholesale/route.ts`
-
-- [ ] **Step 1: Insert the upgrade branch after auth registration**
-
-Locate the block in `route.ts` that runs immediately after a successful
-auth register (after the `authIdentityId` constant is assigned, roughly
-around line 183 in the current file):
-
-```ts
-    const authIdentityId = authResult.authIdentity.id
-
     // 4. Create customer account linked to auth identity
     const customerData = {
+      first_name: body.first_name,
+      last_name: body.last_name,
+      email: body.email,
+      company_name: body.company_name || null,
+      phone: body.phone || null,
+      has_account: true,
+      metadata: {
+        tax_id: body.tax_id || null,
+        tax_documents: taxDocuments,
+        registration_date: new Date().toISOString(),
+        pending_approval: true,
+        registration_source: "wholesale_portal",
+      },
+    }
+
+    const { result: customerResult } = await createCustomerAccountWorkflow(req.scope).run({
+      input: {
+        authIdentityId,
+        customerData,
+      },
+    })
+
+    logger.info(
+      `[Wholesale Registration] Created wholesale customer ${customerResult.id} (${body.email})`
+    )
+
+    // Return success response (user will need to log in separately)
+    res.status(201).json({
+      customer: {
+        id: customerResult.id,
+        email: customerResult.email,
+        first_name: customerResult.first_name,
+        last_name: customerResult.last_name,
+        company_name: customerResult.company_name,
+      },
+      message: "Registration successful. Your account is pending approval.",
+    })
 ```
 
-Replace from "4. Create customer account linked to auth identity" down through
-the existing `createCustomerAccountWorkflow` call + its `logger.info`/response
-block with the following:
+Replace it with:
 
 ```ts
     const registrationMetadata = {
@@ -515,7 +292,8 @@ block with the following:
     }
 
     if (guestRow) {
-      // Upgrade-in-place: keep the existing guest row so carts/orders stay linked.
+      // Upgrade-in-place: keep the existing guest row so historical
+      // carts/orders stay attached. Then link the auth_identity to it.
       const mergedMetadata = {
         ...((guestRow.metadata as Record<string, unknown> | null) || {}),
         ...registrationMetadata,
@@ -534,7 +312,6 @@ block with the following:
         }
       )
 
-      // Link the newly created auth_identity to the upgraded customer.
       const authModuleForLink = req.scope.resolve(Modules.AUTH)
       const existingAuth = await authModuleForLink.retrieveAuthIdentity(
         authIdentityId
@@ -569,107 +346,6 @@ block with the following:
         metadata: registrationMetadata,
       }
 
-      const { result } = await createCustomerAccountWorkflow(req.scope).run({
-        input: {
-          authIdentityId,
-          customerData,
-        },
-      })
-
-      customerResult = {
-        id: result.id,
-        email: result.email,
-        first_name: result.first_name ?? null,
-        last_name: result.last_name ?? null,
-        company_name: result.company_name ?? null,
-      }
-
-      logger.info(
-        `[Wholesale Registration] Created wholesale customer ${result.id} (${emailLc})`
-      )
-    }
-
-    res.status(201).json({
-      customer: customerResult,
-      message: "Registration successful. Your account is pending approval.",
-    })
-    return
-```
-
-Remove the now-obsolete trailing `res.status(201).json({ customer: { id: customerResult.id, ... } })` block that was previously at the end of the function — it is replaced by the single `res.status(201).json(...)` inside both branches above.
-
-- [ ] **Step 2: Run all uniqueness tests**
-
-```bash
-npm run test:integration:http -- --testPathPattern=register-wholesale-uniqueness
-```
-
-Expected: all three tests (smoke, case-variant, guest-upgrade) PASS.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add src/api/store/customers/register-wholesale/route.ts
-git commit -m "feat(register-wholesale): upgrade guest customer in place on registration"
-```
-
----
-
-## Task 7: Red + green — gracefully handle partial-index race
-
-**Files:**
-- Modify: `integration-tests/http/register-wholesale-uniqueness.spec.ts`
-- Modify: `src/api/store/customers/register-wholesale/route.ts`
-
-- [ ] **Step 1: Add a failing test that drives the DB-level duplicate path**
-
-Append to the same `describe` block:
-
-```ts
-it("returns 409 when the partial unique index blocks a simultaneous duplicate", async () => {
-  const email = testEmail("race")
-  const container = getContainer()
-  const db = container.resolve("__pg_connection__")
-
-  // Simulate a concurrent-write scenario: a registered row already exists,
-  // produced outside this route (e.g. admin create, guest->registered edge).
-  await db.raw(
-    `INSERT INTO customer (id, email, has_account, created_at, updated_at)
-     VALUES ($1, $2, true, NOW(), NOW())`,
-    [`cus_${TEST_PREFIX}race_${Date.now()}`, email]
-  )
-
-  const res = await api.post("/store/customers/register-wholesale", {
-    ...baseBody,
-    email,
-  })
-
-  expect(res.status).toBe(409)
-  expect(await countCustomers(email.toLowerCase())).toBe(1)
-})
-```
-
-- [ ] **Step 2: Run and confirm it fails**
-
-```bash
-npm run test:integration:http -- --testPathPattern=register-wholesale-uniqueness \
-  -t "partial unique index blocks"
-```
-
-Expected: after Task 6 this case is actually already handled by the
-application-level check, so the test probably PASSES already. If it passes, the
-test still serves as a regression guard — mark Step 2 and Step 4 complete.
-
-If it instead FAILs with an unhandled database error (e.g. the response is 500
-because a `duplicate key value` error escaped), proceed to Step 3 to add the
-catch.
-
-- [ ] **Step 3: Wrap the `createCustomerAccountWorkflow` call so a unique-index violation becomes a 409**
-
-In `route.ts`, inside the `else` branch of the upgrade check (the "create new"
-path), wrap the workflow call:
-
-```ts
       try {
         const { result } = await createCustomerAccountWorkflow(req.scope).run({
           input: {
@@ -701,42 +377,47 @@ path), wrap the workflow call:
         }
         throw err
       }
+
+      logger.info(
+        `[Wholesale Registration] Created wholesale customer ${customerResult.id} (${emailLc})`
+      )
+    }
+
+    res.status(201).json({
+      customer: customerResult,
+      message: "Registration successful. Your account is pending approval.",
+    })
+    return
 ```
 
-- [ ] **Step 4: Re-run the test — expect PASS**
-
-```bash
-npm run test:integration:http -- --testPathPattern=register-wholesale-uniqueness
-```
-
-Expected: all four tests PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add integration-tests/http/register-wholesale-uniqueness.spec.ts \
-        src/api/store/customers/register-wholesale/route.ts
-git commit -m "feat(register-wholesale): surface partial-index conflicts as 409"
-```
-
----
-
-## Task 8: Build, deploy, and smoke test in production
-
-**Files:** no code changes
-
-- [ ] **Step 1: Typecheck**
+- [ ] **Step 5: Typecheck**
 
 ```bash
 cd /var/www/arrotti/my-medusa-store
 npx tsc --noEmit -p tsconfig.json
 ```
 
-Expected: exits with status 0, no output.
+Expected: exits 0, no output.
 
-- [ ] **Step 2: Build**
+- [ ] **Step 6: Commit**
 
 ```bash
+git add src/api/store/customers/register-wholesale/route.ts
+git commit -m "feat(register-wholesale): case-insensitive dedupe + guest upgrade-in-place"
+```
+
+---
+
+## Task 3: Build, deploy, and manual smoke test in production
+
+**Files:** no code changes
+
+This task replaces the original Task 8.
+
+- [ ] **Step 1: Build**
+
+```bash
+cd /var/www/arrotti/my-medusa-store
 npm run build
 ```
 
@@ -746,15 +427,16 @@ info:    Backend build completed successfully
 info:    Frontend build completed successfully
 ```
 
-- [ ] **Step 3: Restart the backend service**
+- [ ] **Step 2: Restart the backend service**
 
 ```bash
 sudo systemctl restart medusa-backend.service
 ```
 
-- [ ] **Step 4: Service health check**
+- [ ] **Step 3: Service health check**
 
 ```bash
+sleep 2
 systemctl is-active medusa-backend.service
 curl -sS -o /dev/null -w "health: %{http_code}\n" http://localhost:9002/health
 ```
@@ -765,47 +447,86 @@ active
 health: 200
 ```
 
-- [ ] **Step 5: Smoke test the route with curl**
+- [ ] **Step 4: Capture publishable API key for smoke test**
 
-Replace `PUBLISHABLE_KEY` with the B2B publishable API key from
-`/var/www/arrotti/my-medusa-store-storefront-b2b/.env.local` (variable name
-`NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY`).
+```bash
+PUB_KEY=$(grep NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY /var/www/arrotti/my-medusa-store-storefront-b2b/.env.local | cut -d= -f2)
+echo "key found: ${PUB_KEY:0:8}..."
+```
+
+Expected: prints first 8 chars of the key. If empty, look in `.env.production` instead.
+
+- [ ] **Step 5: Smoke test — happy path (new email → 201)**
 
 ```bash
 STAMP=$(date +%s)
 EMAIL="smoke-${STAMP}@example.com"
 curl -sS -X POST http://localhost:9002/store/customers/register-wholesale \
-  -H "x-publishable-api-key: PUBLISHABLE_KEY" \
+  -H "x-publishable-api-key: ${PUB_KEY}" \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"${EMAIL}\",\"password\":\"SmokeTest1!\",\"first_name\":\"Smoke\",\"last_name\":\"Test\"}" \
   -w "\nHTTP %{http_code}\n"
+```
 
-# Second call with uppercased email — expect 409
+Expected: HTTP 201, response body contains `"customer":{"id":"cus_..."` and the `email` matches `${EMAIL}` lowercased.
+
+- [ ] **Step 6: Smoke test — case-variant rejection (uppercased email → 409)**
+
+```bash
 curl -sS -X POST http://localhost:9002/store/customers/register-wholesale \
-  -H "x-publishable-api-key: PUBLISHABLE_KEY" \
+  -H "x-publishable-api-key: ${PUB_KEY}" \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"$(echo ${EMAIL} | tr a-z A-Z)\",\"password\":\"SmokeTest1!\",\"first_name\":\"Smoke\",\"last_name\":\"Test\"}" \
   -w "\nHTTP %{http_code}\n"
 ```
 
-Expected: first call returns HTTP 201 with a `customer` object. Second call returns HTTP 409 with the "please sign in" message.
+Expected: HTTP 409, message `"An account with this email already exists. Please sign in instead."`.
 
-- [ ] **Step 6: Clean up the smoke-test customer**
+- [ ] **Step 7: Smoke test — guest upgrade in place**
+
+```bash
+GUEST_EMAIL="guest-smoke-${STAMP}@example.com"
+GUEST_ID="cus_smoke_$(date +%s%N | cut -c1-20)"
+
+# Seed a guest row directly in the DB (bypassing the route, mimicking a guest checkout)
+PGPASSWORD=medusa123 psql -U medusa -h localhost -d medusa-my-medusa-store -c \
+  "INSERT INTO customer (id, email, has_account, first_name, last_name, created_at, updated_at)
+   VALUES ('${GUEST_ID}', '${GUEST_EMAIL}', false, 'Guest', 'Buyer', NOW(), NOW());"
+
+# Count rows for that email — should be 1
+PGPASSWORD=medusa123 psql -U medusa -h localhost -d medusa-my-medusa-store -t -c \
+  "SELECT COUNT(*) FROM customer WHERE LOWER(email)='${GUEST_EMAIL}';"
+
+# Now register via the route — should upgrade in place
+curl -sS -X POST http://localhost:9002/store/customers/register-wholesale \
+  -H "x-publishable-api-key: ${PUB_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"${GUEST_EMAIL}\",\"password\":\"SmokeTest1!\",\"first_name\":\"Upgraded\",\"last_name\":\"User\",\"company_name\":\"Upgrade Co\"}" \
+  -w "\nHTTP %{http_code}\n"
+
+# Count rows again — should still be 1, and that row should now have has_account=true
+PGPASSWORD=medusa123 psql -U medusa -h localhost -d medusa-my-medusa-store -c \
+  "SELECT id, email, has_account, company_name FROM customer WHERE LOWER(email)='${GUEST_EMAIL}';"
+```
+
+Expected: HTTP 201; final SELECT returns exactly one row with `id=${GUEST_ID}`, `has_account=t`, `company_name='Upgrade Co'`.
+
+- [ ] **Step 8: Clean up the smoke-test customers**
 
 ```bash
 PGPASSWORD=medusa123 psql -U medusa -h localhost -d medusa-my-medusa-store -c \
-  "DELETE FROM provider_identity WHERE entity_id LIKE 'smoke-%@example.com';
-   DELETE FROM customer WHERE email LIKE 'smoke-%@example.com';"
+  "DELETE FROM provider_identity WHERE entity_id LIKE 'smoke-%@example.com' OR entity_id LIKE 'guest-smoke-%@example.com';
+   DELETE FROM customer WHERE email LIKE 'smoke-%@example.com' OR email LIKE 'guest-smoke-%@example.com';"
 ```
 
-- [ ] **Step 7: Push to origin**
+- [ ] **Step 9: Push to origin**
 
 ```bash
 cd /var/www/arrotti/my-medusa-store
 git push origin main
 ```
 
-Expected: successful push, new commits visible on GitHub.
+Expected: successful push, all new commits on GitHub.
 
 ---
 
