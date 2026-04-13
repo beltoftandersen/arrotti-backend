@@ -5,7 +5,6 @@ import {
 import {
   CalculatedShippingOptionPrice,
   CalculateShippingOptionPriceDTO,
-  CartLineItemDTO,
   CreateShippingOptionDTO,
   FulfillmentOption,
   OrderLineItemDTO,
@@ -133,70 +132,6 @@ class UpsProviderService extends AbstractFulfillmentProviderService {
       PostalCode: address.postal_code || "",
       CountryCode: address.country_code || "",
     }
-  }
-
-  /**
-   * Aggregate item weights and dimensions, same logic as ShipStation.
-   * Accumulates weight and height per quantity, maximizes length and width.
-   */
-  private aggregatePackage(
-    items: CartLineItemDTO[] | OrderLineItemDTO[]
-  ): UpsPackage {
-    let totalWeight = 0
-    let maxLength = 0
-    let maxWidth = 0
-    let totalHeight = 0
-
-    for (const item of items) {
-      // @ts-ignore - variant object is available at runtime
-      const variant = item.variant
-      const qty = Number(item.quantity) || 1
-      totalWeight += (variant?.weight || 0) * qty
-      maxLength = Math.max(maxLength, variant?.length || 0)
-      maxWidth = Math.max(maxWidth, variant?.width || 0)
-      totalHeight += (variant?.height || 0) * qty
-    }
-
-    if (totalWeight === 0) {
-      throw new MedusaError(
-        MedusaError.Types.INVALID_DATA,
-        "Cannot calculate shipping: product weights are not configured. " +
-          "Please set weights on product variants or category shipping defaults."
-      )
-    }
-
-    const envWeightUnit = (process.env.SHIPPING_WEIGHT_UNIT ||
-      "pound") as WeightUnit
-    const envDimensionUnit = (process.env.SHIPPING_DIMENSION_UNIT ||
-      "inch") as DimensionUnit
-
-    const upsWeightUnit = WEIGHT_UNIT_MAP[envWeightUnit] || "LBS"
-    const upsDimensionUnit = DIMENSION_UNIT_MAP[envDimensionUnit] || "IN"
-    const conversionFactor = WEIGHT_CONVERSION[envWeightUnit] || 1
-
-    const convertedWeight = totalWeight * conversionFactor
-
-    const pkg: UpsPackage = {
-      PackagingType: {
-        Code: "02", // Customer Supplied Package
-        Description: "Package",
-      },
-      PackageWeight: {
-        UnitOfMeasurement: { Code: upsWeightUnit },
-        Weight: convertedWeight.toFixed(1),
-      },
-    }
-
-    if (maxLength > 0 && maxWidth > 0 && totalHeight > 0) {
-      pkg.Dimensions = {
-        UnitOfMeasurement: { Code: upsDimensionUnit },
-        Length: maxLength.toFixed(1),
-        Width: maxWidth.toFixed(1),
-        Height: totalHeight.toFixed(1),
-      }
-    }
-
-    return pkg
   }
 
   private packageToUpsPackage(pkg: {
@@ -424,7 +359,25 @@ class UpsProviderService extends AbstractFulfillmentProviderService {
       }
     }
 
-    const pkg = this.aggregatePackage(itemsToFulfill)
+    const packInputs: PackInput[] = itemsToFulfill.map((item) => ({
+      variant_id: (item as any).variant_id ?? null,
+      quantity: Number((item as any).quantity) || 0,
+      weight: (item as any).variant?.weight ?? null,
+      length: (item as any).variant?.length ?? null,
+      width: (item as any).variant?.width ?? null,
+      height: (item as any).variant?.height ?? null,
+    }))
+    const packed = packCart(packInputs)
+    if (packed.length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "Cannot create UPS shipment: order has no items or items lack weights."
+      )
+    }
+    const upsPackages = packed.map((p, idx) => ({
+      ...this.packageToUpsPackage(p),
+      Description: `Order ${orderObj.display_id || orderObj.id} (pkg ${idx + 1}/${packed.length})`,
+    }))
 
     const shipmentResponse = await this.client.createShipment({
       ShipmentRequest: {
@@ -466,12 +419,7 @@ class UpsProviderService extends AbstractFulfillmentProviderService {
             ],
           },
           Service: { Code: upsServiceCode },
-          Package: [
-            {
-              ...pkg,
-              Description: `Order ${orderObj.display_id || orderObj.id}`,
-            },
-          ],
+          Package: upsPackages,
         },
         LabelSpecification: {
           LabelImageFormat: { Code: "GIF" },
@@ -481,28 +429,34 @@ class UpsProviderService extends AbstractFulfillmentProviderService {
     })
 
     const results = shipmentResponse.ShipmentResponse.ShipmentResults
-    const packageResult = Array.isArray(results.PackageResults)
-      ? results.PackageResults[0]
-      : results.PackageResults
+    const packageResults = Array.isArray(results.PackageResults)
+      ? results.PackageResults
+      : [results.PackageResults]
 
-    const trackingNumber = packageResult.TrackingNumber
-    const labelBase64 = packageResult.ShippingLabel.GraphicImage
-    const labelDataUri = `data:image/gif;base64,${labelBase64}`
+    const labels = packageResults.map((r: any) => {
+      const trackingNumber: string = r.TrackingNumber
+      const labelBase64: string = r.ShippingLabel.GraphicImage
+      return {
+        tracking_number: trackingNumber,
+        tracking_url: `https://www.ups.com/track?tracknum=${trackingNumber}`,
+        label_url: `data:image/gif;base64,${labelBase64}`,
+      }
+    })
+    const trackingNumbers = labels.map((l) => l.tracking_number)
 
     return {
       data: {
         ...((fulfillment.data as object) || {}),
-        tracking_number: trackingNumber,
+        // Primary tracking number (first package) for legacy code paths that
+        // read a single tracking number. All tracking numbers are in
+        // tracking_numbers below.
+        tracking_number: trackingNumbers[0],
+        tracking_numbers: trackingNumbers,
         shipment_id: results.ShipmentIdentificationNumber,
         ups_service_code: upsServiceCode,
+        package_count: packageResults.length,
       },
-      labels: [
-        {
-          tracking_number: trackingNumber,
-          tracking_url: `https://www.ups.com/track?tracknum=${trackingNumber}`,
-          label_url: labelDataUri,
-        },
-      ],
+      labels,
     }
   }
 
