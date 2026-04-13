@@ -83,4 +83,15 @@ describe("packCart", () => {
     expect(loose).toHaveLength(1)
     expect(strict).toHaveLength(2)
   })
+
+  it("produces identical output across repeated calls (determinism)", () => {
+    const input = [
+      { variant_id: "a", quantity: 3, weight: 7, length: 22, width: 16, height: 14 },
+      { variant_id: "b", quantity: 6, weight: 11, length: 76, width: 12, height: 8 },
+      { variant_id: "c", quantity: 1, weight: 9, length: 57, width: 17, height: 10 },
+    ]
+    const r1 = packCart(input)
+    const r2 = packCart(input)
+    expect(r2).toEqual(r1)
+  })
 })
