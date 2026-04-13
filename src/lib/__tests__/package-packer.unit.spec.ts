@@ -94,4 +94,37 @@ describe("packCart", () => {
     const r2 = packCart(input)
     expect(r2).toEqual(r1)
   })
+
+  it("packs a real mixed cart within budget per package", () => {
+    // Real cart that surfaced the bug:
+    // 1 grille (TO1036204): 9lb, 57x17x10
+    // 6 moldings (TO1224127): 11lb each, 76x12x8
+    // 3 tanks (TO3014140): 7lb each, 22x16x14
+    const result = packCart([
+      { variant_id: "grille", quantity: 1, weight: 9, length: 57, width: 17, height: 10 },
+      { variant_id: "molding", quantity: 6, weight: 11, length: 76, width: 12, height: 8 },
+      { variant_id: "tank", quantity: 3, weight: 7, length: 22, width: 16, height: 14 },
+    ])
+
+    expect(result.length).toBeGreaterThan(1)
+
+    for (const p of result) {
+      // Weight cap applies to every package.
+      expect(p.weight).toBeLessThanOrEqual(50)
+      // Size cap applies only to multi-unit packages. Single oversized items
+      // (like the 76" moldings or 57" grille) ship as their own oversized parcel
+      // and retain their real dimensions so the carrier charges accordingly.
+      if (p.units > 1) {
+        expect(Math.max(p.length, p.width, p.height)).toBeLessThanOrEqual(48)
+      }
+    }
+
+    // Total weight preserved: 9 + 66 + 21 = 96
+    const totalWeight = result.reduce((s, p) => s + p.weight, 0)
+    expect(totalWeight).toBe(96)
+
+    // Total units preserved: 1 + 6 + 3 = 10
+    const totalUnits = result.reduce((s, p) => s + p.units, 0)
+    expect(totalUnits).toBe(10)
+  })
 })
