@@ -242,11 +242,12 @@ export async function POST(
         [guestRow.id]
       )
 
-      const authModuleForLink = req.scope.resolve(Modules.AUTH)
-      const existingAuth = await authModuleForLink.retrieveAuthIdentity(
-        authIdentityId
-      )
-      await authModuleForLink.updateAuthIdentities({
+      // If updateAuthIdentities throws here, the auth_identity is left
+      // orphaned (no customer_id linked). Same risk profile as the create
+      // branch — handled by ops cleanup, not auto-recovery from a public
+      // endpoint.
+      const existingAuth = await authModule.retrieveAuthIdentity(authIdentityId)
+      await authModule.updateAuthIdentities({
         id: authIdentityId,
         app_metadata: {
           ...(existingAuth.app_metadata || {}),
@@ -256,7 +257,7 @@ export async function POST(
 
       customerResult = {
         id: updated.id,
-        email: updated.email,
+        email: emailLc,
         first_name: updated.first_name ?? null,
         last_name: updated.last_name ?? null,
         company_name: updated.company_name ?? null,
@@ -285,7 +286,7 @@ export async function POST(
         })
         customerResult = {
           id: result.id,
-          email: result.email,
+          email: emailLc,
           first_name: result.first_name ?? null,
           last_name: result.last_name ?? null,
           company_name: result.company_name ?? null,
