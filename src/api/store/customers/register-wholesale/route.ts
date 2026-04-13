@@ -138,16 +138,32 @@ export async function POST(
       logger.info(`[Wholesale Registration] Uploaded ${taxDocuments.length} tax documents`)
     }
 
-    // 2. Check if customer with this email already exists
-    const customerModule = req.scope.resolve(Modules.CUSTOMER)
-    const existingCustomers = await customerModule.listCustomers({ email: body.email })
+    // Normalize email and look up existing rows case-insensitively via
+    // raw SQL — same semantics as the partial unique index
+    // (LOWER(email) WHERE has_account = true AND deleted_at IS NULL).
+    const emailLc = body.email.trim().toLowerCase()
 
-    if (existingCustomers.length > 0) {
+    const customerModule = req.scope.resolve(Modules.CUSTOMER)
+    const db = req.scope.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+
+    const { rows: existingRows } = await db.raw(
+      `SELECT id, email, has_account, first_name, last_name,
+              company_name, phone, metadata, created_at
+         FROM customer
+        WHERE LOWER(email) = ? AND deleted_at IS NULL
+        ORDER BY created_at ASC`,
+      [emailLc]
+    )
+
+    const registeredRow = existingRows.find((r: any) => r.has_account === true)
+    if (registeredRow) {
       res.status(409).json({
         message: "An account with this email already exists. Please sign in instead.",
       })
       return
     }
+
+    const guestRow = existingRows.find((r: any) => r.has_account === false)
 
     // 3. Register auth identity (email/password)
     const authModule = req.scope.resolve(Modules.AUTH)
@@ -156,7 +172,7 @@ export async function POST(
     try {
       authResult = await authModule.register("emailpass", {
         body: {
-          email: body.email,
+          email: emailLc,
           password: body.password,
         },
       } as any)
@@ -182,45 +198,119 @@ export async function POST(
 
     const authIdentityId = authResult.authIdentity.id
 
-    // 4. Create customer account linked to auth identity
-    const customerData = {
-      first_name: body.first_name,
-      last_name: body.last_name,
-      email: body.email,
-      company_name: body.company_name || null,
-      phone: body.phone || null,
-      has_account: true,
-      metadata: {
-        tax_id: body.tax_id || null,
-        tax_documents: taxDocuments,
-        registration_date: new Date().toISOString(),
-        pending_approval: true,
-        registration_source: "wholesale_portal",
-      },
+    const registrationMetadata = {
+      tax_id: body.tax_id || null,
+      tax_documents: taxDocuments,
+      registration_date: new Date().toISOString(),
+      pending_approval: true,
+      registration_source: "wholesale_portal",
     }
 
-    const { result: customerResult } = await createCustomerAccountWorkflow(req.scope).run({
-      input: {
-        authIdentityId,
-        customerData,
-      },
-    })
+    let customerResult: {
+      id: string
+      email: string
+      first_name: string | null
+      last_name: string | null
+      company_name: string | null
+    }
 
-    logger.info(
-      `[Wholesale Registration] Created wholesale customer ${customerResult.id} (${body.email})`
-    )
+    if (guestRow) {
+      // Upgrade-in-place: keep the existing guest row so historical
+      // carts/orders stay attached. Then link the auth_identity to it.
+      const mergedMetadata = {
+        ...((guestRow.metadata as Record<string, unknown> | null) || {}),
+        ...registrationMetadata,
+      }
 
-    // Return success response (user will need to log in separately)
+      const [updated] = await customerModule.updateCustomers(
+        [guestRow.id],
+        {
+          first_name: body.first_name,
+          last_name: body.last_name,
+          email: emailLc,
+          company_name: body.company_name || null,
+          phone: body.phone || null,
+          has_account: true,
+          metadata: mergedMetadata,
+        } as any
+      )
+
+      const authModuleForLink = req.scope.resolve(Modules.AUTH)
+      const existingAuth = await authModuleForLink.retrieveAuthIdentity(
+        authIdentityId
+      )
+      await authModuleForLink.updateAuthIdentities({
+        id: authIdentityId,
+        app_metadata: {
+          ...(existingAuth.app_metadata || {}),
+          customer_id: guestRow.id,
+        },
+      })
+
+      customerResult = {
+        id: updated.id,
+        email: updated.email,
+        first_name: updated.first_name ?? null,
+        last_name: updated.last_name ?? null,
+        company_name: updated.company_name ?? null,
+      }
+
+      logger.info(
+        `[Wholesale Registration] Upgraded guest ${guestRow.id} to wholesale account (${emailLc})`
+      )
+    } else {
+      const customerData = {
+        first_name: body.first_name,
+        last_name: body.last_name,
+        email: emailLc,
+        company_name: body.company_name || null,
+        phone: body.phone || null,
+        has_account: true,
+        metadata: registrationMetadata,
+      }
+
+      try {
+        const { result } = await createCustomerAccountWorkflow(req.scope).run({
+          input: {
+            authIdentityId,
+            customerData,
+          },
+        })
+        customerResult = {
+          id: result.id,
+          email: result.email,
+          first_name: result.first_name ?? null,
+          last_name: result.last_name ?? null,
+          company_name: result.company_name ?? null,
+        }
+      } catch (err: any) {
+        const msg = (err?.message || "") + " " + (err?.detail || "")
+        if (
+          msg.includes("customer_email_has_account_uniq") ||
+          msg.includes("duplicate key value") ||
+          err?.code === "23505"
+        ) {
+          logger.warn(
+            `[Wholesale Registration] Unique index blocked duplicate for ${emailLc}`
+          )
+          res.status(409).json({
+            message: "An account with this email already exists. Please sign in instead.",
+          })
+          return
+        }
+        throw err
+      }
+
+      logger.info(
+        `[Wholesale Registration] Created wholesale customer ${customerResult.id} (${emailLc})`
+      )
+    }
+
     res.status(201).json({
-      customer: {
-        id: customerResult.id,
-        email: customerResult.email,
-        first_name: customerResult.first_name,
-        last_name: customerResult.last_name,
-        company_name: customerResult.company_name,
-      },
+      customer: customerResult,
       message: "Registration successful. Your account is pending approval.",
     })
+    return
   } catch (error: any) {
     logger.error(
       `[Wholesale Registration] Error: ${error.message}`
