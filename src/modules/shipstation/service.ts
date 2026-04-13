@@ -18,6 +18,7 @@ import {
   Rate,
   ShipStationAddress,
 } from "./types"
+import { packCart, PackInput } from "../../lib/package-packer"
 
 type WeightUnit = "pound" | "ounce" | "gram" | "kilogram"
 type DimensionUnit = "inch" | "centimeter"
@@ -198,49 +199,39 @@ class ShipStationProviderService extends AbstractFulfillmentProviderService {
       address_residential_indicator: "unknown",
     }
 
-    // Medusa passes item.variant at runtime with weight/dimensions
-    // (see official ShipStation guide: @ts-ignore item.variant.weight)
-    let totalWeight = 0
-    let maxLength = 0
-    let maxWidth = 0
-    let totalHeight = 0
-
-    for (const item of items) {
-      // @ts-ignore - variant object is available at runtime
-      const variant = item.variant
-      const qty = Number(item.quantity) || 1
-      totalWeight += (variant?.weight || 0) * qty
-      maxLength = Math.max(maxLength, variant?.length || 0)
-      maxWidth = Math.max(maxWidth, variant?.width || 0)
-      totalHeight += (variant?.height || 0) * qty
-    }
-
-    if (totalWeight === 0) {
+    const packInputs: PackInput[] = (items || []).map((item: any) => ({
+      variant_id: item.variant_id ?? null,
+      quantity: Number(item.quantity) || 0,
+      weight: item.variant?.weight ?? null,
+      length: item.variant?.length ?? null,
+      width: item.variant?.width ?? null,
+      height: item.variant?.height ?? null,
+    }))
+    const packed = packCart(packInputs)
+    if (packed.length === 0) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
-        "Cannot calculate shipping: product weights are not configured. " +
-        "Please set weights on product variants or category shipping defaults."
+        "Cannot calculate shipping: cart has no items or items lack weights."
       )
     }
 
     const weightUnit = (process.env.SHIPPING_WEIGHT_UNIT || "pound") as WeightUnit
     const dimensionUnit = (process.env.SHIPPING_DIMENSION_UNIT || "inch") as DimensionUnit
 
-    const packagePayload: any = {
-      weight: {
-        value: totalWeight,
-        unit: weightUnit,
-      },
-    }
-
-    if (maxLength > 0 && maxWidth > 0 && totalHeight > 0) {
-      packagePayload.dimensions = {
-        length: maxLength,
-        width: maxWidth,
-        height: totalHeight,
-        unit: dimensionUnit,
+    const packagePayloads = packed.map((p) => {
+      const payload: any = {
+        weight: { value: p.weight, unit: weightUnit },
       }
-    }
+      if (p.length > 0 && p.width > 0 && p.height > 0) {
+        payload.dimensions = {
+          length: p.length,
+          width: p.width,
+          height: p.height,
+          unit: dimensionUnit,
+        }
+      }
+      return payload
+    })
 
     return await this.client.getShippingRates({
       shipment: {
@@ -254,7 +245,7 @@ class ShipStationProviderService extends AbstractFulfillmentProviderService {
           quantity: item.quantity,
           sku: item.variant_sku || "",
         })),
-        packages: [packagePayload],
+        packages: packagePayloads,
         customs: {
           contents: "merchandise",
           non_delivery: "return_to_sender",
