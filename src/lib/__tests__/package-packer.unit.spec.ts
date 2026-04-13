@@ -53,4 +53,34 @@ describe("packCart", () => {
     const heaviest = result.reduce((m, p) => (p.weight > m.weight ? p : m))
     expect(heaviest.weight).toBe(45)
   })
+
+  it("respects a tighter maxWeightLb override", () => {
+    const result = packCart(
+      [
+        { variant_id: "v1", quantity: 2, weight: 20, length: 10, width: 10, height: 10 },
+      ],
+      { maxWeightLb: 30 }
+    )
+    // Both units 20lb; budget 30lb -> each its own package.
+    expect(result).toHaveLength(2)
+  })
+
+  it("respects a tighter maxLongestIn override", () => {
+    // Stacking 2 units (h=10 each) -> height 20, longest 20 = cap -> still fits in ONE.
+    const loose = packCart(
+      [
+        { variant_id: "v1", quantity: 2, weight: 10, length: 20, width: 10, height: 10 },
+      ],
+      { maxLongestIn: 20 }
+    )
+    // Tighten to 19 -> 20" length already exceeds cap for any single unit -> each its own.
+    const strict = packCart(
+      [
+        { variant_id: "v1", quantity: 2, weight: 10, length: 20, width: 10, height: 10 },
+      ],
+      { maxLongestIn: 19 }
+    )
+    expect(loose).toHaveLength(1)
+    expect(strict).toHaveLength(2)
+  })
 })
