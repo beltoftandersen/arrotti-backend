@@ -59,9 +59,25 @@ function tryAdd(pkg: Package, unit: Unit, maxWeightLb: number, maxLongestIn: num
   return next
 }
 
+/**
+ * Resolves the effective caps, preferring explicit opts over env vars
+ * over compiled-in defaults.
+ */
+export function resolveCaps(opts?: PackOptions): { maxWeightLb: number; maxLongestIn: number } {
+  const envWeight = Number(process.env.PACKAGE_MAX_WEIGHT_LB)
+  const envLongest = Number(process.env.PACKAGE_MAX_LONGEST_IN)
+  return {
+    maxWeightLb:
+      opts?.maxWeightLb ??
+      (Number.isFinite(envWeight) && envWeight > 0 ? envWeight : DEFAULT_MAX_WEIGHT_LB),
+    maxLongestIn:
+      opts?.maxLongestIn ??
+      (Number.isFinite(envLongest) && envLongest > 0 ? envLongest : DEFAULT_MAX_LONGEST_IN),
+  }
+}
+
 export function packCart(items: PackInput[], opts?: PackOptions): Package[] {
-  const maxWeightLb = opts?.maxWeightLb ?? DEFAULT_MAX_WEIGHT_LB
-  const maxLongestIn = opts?.maxLongestIn ?? DEFAULT_MAX_LONGEST_IN
+  const { maxWeightLb, maxLongestIn } = resolveCaps(opts)
 
   const units = expandToUnits(items)
   if (units.length === 0) return []
