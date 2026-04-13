@@ -12,6 +12,12 @@
 
 **Working directory:** `/var/www/arrotti/my-medusa-store`
 
+**⚠ Production-database execution (option C).** `.env.test` is empty; integration tests run against the live Postgres instance. All test rows use the prefix
+`__test_uniqueness_` in emails and ids, and every test file ships with
+`beforeAll`/`afterAll` teardown hooks that delete any row whose email starts
+with that prefix. Prod data never shares that pattern, so a failed teardown
+still never touches real customers.
+
 ---
 
 ## File Structure
@@ -145,6 +151,17 @@ import { Modules } from "@medusajs/framework/utils"
 
 jest.setTimeout(120 * 1000)
 
+/**
+ * Prefix applied to every email and customer id this test file creates.
+ * The afterAll hook hard-deletes any row matching this pattern, so the
+ * test file is safe to run against the production database.
+ */
+const TEST_PREFIX = "__test_uniqueness_"
+
+function testEmail(tag: string): string {
+  return `${TEST_PREFIX}${tag}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}@example.com`
+}
+
 medusaIntegrationTestRunner({
   inApp: true,
   env: {},
@@ -167,10 +184,43 @@ medusaIntegrationTestRunner({
         return rows[0].n as number
       }
 
+      async function teardownTestData() {
+        const container = getContainer()
+        const db = container.resolve("__pg_connection__")
+        // Remove auth/provider rows first (FK-safe); then customers.
+        await db.raw(
+          `DELETE FROM provider_identity WHERE entity_id LIKE $1`,
+          [`${TEST_PREFIX}%`]
+        )
+        await db.raw(
+          `DELETE FROM auth_identity
+             WHERE id NOT IN (SELECT auth_identity_id FROM provider_identity WHERE auth_identity_id IS NOT NULL)
+               AND app_metadata::text LIKE $1`,
+          [`%${TEST_PREFIX}%`]
+        )
+        await db.raw(
+          `DELETE FROM customer_group_customer
+             WHERE customer_id IN (SELECT id FROM customer WHERE email LIKE $1)`,
+          [`${TEST_PREFIX}%`]
+        )
+        await db.raw(
+          `DELETE FROM customer WHERE email LIKE $1 OR id LIKE $2`,
+          [`${TEST_PREFIX}%`, `cus_${TEST_PREFIX}%`]
+        )
+      }
+
+      beforeAll(async () => {
+        await teardownTestData()
+      })
+
+      afterAll(async () => {
+        await teardownTestData()
+      })
+
       it("smoke: runner boots and route is reachable", async () => {
         const res = await api.post(
           "/store/customers/register-wholesale",
-          { ...baseBody, email: "smoke-" + Date.now() + "@example.com" }
+          { ...baseBody, email: testEmail("smoke") }
         )
         // Either 201 or a validation-ish error proves the route is mounted.
         expect([201, 400, 409]).toContain(res.status)
@@ -213,7 +263,7 @@ Inside the `describe` block, immediately after the smoke `it(...)` test, add:
 
 ```ts
 it("rejects re-registration with a different casing of an existing registered email", async () => {
-  const email = `case-${Date.now()}@example.com`
+  const email = testEmail("case")
 
   const first = await api.post("/store/customers/register-wholesale", {
     ...baseBody,
@@ -376,7 +426,7 @@ Append to the same `describe` block:
 
 ```ts
 it("upgrades an existing guest customer in place instead of creating a duplicate", async () => {
-  const email = `guest-${Date.now()}@example.com`
+  const email = testEmail("guest")
   const container = getContainer()
   const customerModule = container.resolve(Modules.CUSTOMER)
 
@@ -577,18 +627,16 @@ Append to the same `describe` block:
 
 ```ts
 it("returns 409 when the partial unique index blocks a simultaneous duplicate", async () => {
-  const email = `race-${Date.now()}@example.com`
+  const email = testEmail("race")
   const container = getContainer()
   const db = container.resolve("__pg_connection__")
 
   // Simulate a concurrent-write scenario: a registered row already exists,
   // produced outside this route (e.g. admin create, guest->registered edge).
-  // The app-level lookup still uses raw SQL so we bypass by creating
-  // directly in the DB after the lookup would have resolved.
   await db.raw(
     `INSERT INTO customer (id, email, has_account, created_at, updated_at)
      VALUES ($1, $2, true, NOW(), NOW())`,
-    [`cus_test_race_${Date.now()}`, email]
+    [`cus_${TEST_PREFIX}race_${Date.now()}`, email]
   )
 
   const res = await api.post("/store/customers/register-wholesale", {
