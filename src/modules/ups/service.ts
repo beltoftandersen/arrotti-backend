@@ -18,6 +18,7 @@ import {
   UPS_SERVICES,
   UPS_SERVICE_CODES,
 } from "./types"
+import { packCart, PackInput } from "../../lib/package-packer"
 
 type WeightUnit = "pound" | "ounce" | "gram" | "kilogram"
 type DimensionUnit = "inch" | "centimeter"
@@ -198,6 +199,39 @@ class UpsProviderService extends AbstractFulfillmentProviderService {
     return pkg
   }
 
+  private packageToUpsPackage(pkg: {
+    weight: number
+    length: number
+    width: number
+    height: number
+  }): UpsPackage {
+    const envWeightUnit = (process.env.SHIPPING_WEIGHT_UNIT ||
+      "pound") as WeightUnit
+    const envDimensionUnit = (process.env.SHIPPING_DIMENSION_UNIT ||
+      "inch") as DimensionUnit
+    const upsWeightUnit = WEIGHT_UNIT_MAP[envWeightUnit] || "LBS"
+    const upsDimensionUnit = DIMENSION_UNIT_MAP[envDimensionUnit] || "IN"
+    const conversionFactor = WEIGHT_CONVERSION[envWeightUnit] || 1
+    const convertedWeight = pkg.weight * conversionFactor
+
+    const out: UpsPackage = {
+      PackagingType: { Code: "02", Description: "Package" },
+      PackageWeight: {
+        UnitOfMeasurement: { Code: upsWeightUnit },
+        Weight: convertedWeight.toFixed(1),
+      },
+    }
+    if (pkg.length > 0 && pkg.width > 0 && pkg.height > 0) {
+      out.Dimensions = {
+        UnitOfMeasurement: { Code: upsDimensionUnit },
+        Length: pkg.length.toFixed(1),
+        Width: pkg.width.toFixed(1),
+        Height: pkg.height.toFixed(1),
+      }
+    }
+    return out
+  }
+
   async calculatePrice(
     optionData: CalculateShippingOptionPriceDTO["optionData"],
     data: CalculateShippingOptionPriceDTO["data"],
@@ -248,9 +282,25 @@ class UpsProviderService extends AbstractFulfillmentProviderService {
 
     const shipFromAddress = this.buildUpsAddress(fromLocation.address)
     const shipToAddress = this.buildUpsAddress(context.shipping_address as any)
-    const pkg = this.aggregatePackage(
-      (context.items || []) as CartLineItemDTO[]
+
+    const packInputs: PackInput[] = ((context.items || []) as any[]).map(
+      (item) => ({
+        variant_id: item.variant_id ?? null,
+        quantity: Number(item.quantity) || 0,
+        weight: item.variant?.weight ?? null,
+        length: item.variant?.length ?? null,
+        width: item.variant?.width ?? null,
+        height: item.variant?.height ?? null,
+      })
     )
+    const packed = packCart(packInputs)
+    if (packed.length === 0) {
+      throw new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        "Cannot calculate shipping: cart has no items or items lack weights."
+      )
+    }
+    const upsPackages = packed.map((p) => this.packageToUpsPackage(p))
 
     const rateResponse = await this.client.getRates({
       RateRequest: {
@@ -272,7 +322,7 @@ class UpsProviderService extends AbstractFulfillmentProviderService {
             Address: shipFromAddress,
           },
           Service: { Code: ups_service_code },
-          Package: [pkg],
+          Package: upsPackages,
         },
       },
     })
