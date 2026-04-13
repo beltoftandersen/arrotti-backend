@@ -66,6 +66,17 @@ export function packCart(items: PackInput[], opts?: PackOptions): Package[] {
   const units = expandToUnits(items)
   if (units.length === 0) return []
 
+  // FFD: biggest-hardest-to-pack first. Tie-break fully so sort is deterministic.
+  units.sort((a, b) => {
+    const la = Math.max(a.length, a.width, a.height)
+    const lb = Math.max(b.length, b.width, b.height)
+    if (lb !== la) return lb - la
+    if (b.weight !== a.weight) return b.weight - a.weight
+    if (b.length !== a.length) return b.length - a.length
+    if (b.width !== a.width) return b.width - a.width
+    return b.height - a.height
+  })
+
   const packages: Package[] = []
   for (const unit of units) {
     let placed = false

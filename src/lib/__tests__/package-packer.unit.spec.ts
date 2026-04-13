@@ -41,4 +41,16 @@ describe("packCart", () => {
     expect(result[0].length).toBe(60)
     expect(result[1].length).toBe(60)
   })
+
+  it("packs biggest units first (FFD) for tighter bins", () => {
+    // FFD sort order: b(45lb), a(10lb), c(10lb) -> pkg1: b(45); pkg2: a+c (20lb)
+    const result = packCart([
+      { variant_id: "a", quantity: 1, weight: 10, length: 10, width: 10, height: 10 },
+      { variant_id: "b", quantity: 1, weight: 45, length: 10, width: 10, height: 10 },
+      { variant_id: "c", quantity: 1, weight: 10, length: 10, width: 10, height: 10 },
+    ])
+    expect(result).toHaveLength(2)
+    const heaviest = result.reduce((m, p) => (p.weight > m.weight ? p : m))
+    expect(heaviest.weight).toBe(45)
+  })
 })
