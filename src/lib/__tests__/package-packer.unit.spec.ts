@@ -31,4 +31,14 @@ describe("packCart", () => {
     expect(result[0].weight).toBe(30)
     expect(result[1].weight).toBe(30)
   })
+
+  it("gives a single unit over the longest-side cap its own package", () => {
+    const result = packCart([
+      { variant_id: "v1", quantity: 1, weight: 10, length: 60, width: 10, height: 10 },
+      { variant_id: "v2", quantity: 1, weight: 10, length: 60, width: 10, height: 10 },
+    ])
+    expect(result).toHaveLength(2)
+    expect(result[0].length).toBe(60)
+    expect(result[1].length).toBe(60)
+  })
 })
