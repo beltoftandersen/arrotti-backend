@@ -99,6 +99,41 @@ const quoteLimiter = rateLimit({
   message: { message: "Too many quote requests. Please try again later." },
 })
 
+// Admin login: 10 failed attempts per 15 minutes per IP
+// skipSuccessfulRequests so typical legit traffic is never counted.
+const adminAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  skip: isLocalhost,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many failed login attempts. Please try again later." },
+})
+
+// Customer (storefront) login: 20 failed attempts per 15 minutes per IP
+// Higher than admin because a shared NAT'd IP may serve many customers.
+const customerAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  skip: isLocalhost,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many failed login attempts. Please try again later." },
+})
+
+// Password reset: 5 requests per 15 minutes per IP, counts all requests
+// (prevents email enumeration + reset spam). Tight but deliberate.
+const passwordResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  skip: isLocalhost,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many password reset requests. Please try again later." },
+})
+
 // Wrap express-rate-limit for Medusa's middleware signature
 const wrap = (limiter: any) => {
   return (req: MedusaRequest, res: MedusaResponse, next: MedusaNextFunction) => {
@@ -208,6 +243,30 @@ export default defineMiddlewares({
     {
       matcher: "/store/*",
       middlewares: [wrap(storeGeneralLimiter)],
+    },
+    // Auth: password reset (most restrictive — prevents email enumeration).
+    // Must come BEFORE the broader /auth/*/* login limiters below.
+    {
+      matcher: "/auth/*/*/reset-password",
+      method: ["POST"],
+      middlewares: [wrap(passwordResetLimiter)],
+    },
+    {
+      matcher: "/auth/*/reset-password",
+      method: ["POST"],
+      middlewares: [wrap(passwordResetLimiter)],
+    },
+    // Auth: admin login (user actor type)
+    {
+      matcher: "/auth/user/*",
+      method: ["POST"],
+      middlewares: [wrap(adminAuthLimiter)],
+    },
+    // Auth: customer login (customer actor type)
+    {
+      matcher: "/auth/customer/*",
+      method: ["POST"],
+      middlewares: [wrap(customerAuthLimiter)],
     },
   ],
 })
