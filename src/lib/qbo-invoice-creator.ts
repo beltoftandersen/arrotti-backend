@@ -6,8 +6,9 @@
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { QboClient } from "./qbo-client"
 import { findOrCreateCustomer } from "./qbo-customer"
-import { createInvoice, getInvoice, deleteInvoice, voidInvoice } from "./qbo-invoice"
+import { createInvoice, getInvoice, deleteInvoice, voidInvoice, getNextInvoiceDocNumber } from "./qbo-invoice"
 import type { QboInvoice } from "./qbo-invoice"
+import { QboHttpError } from "./qbo-retry"
 import { findOrCreateTermByDays } from "./qbo-terms"
 import { findItemByName } from "./qbo-accounts"
 import { QBO_CONNECTION_MODULE } from "../modules/qbo-connection"
@@ -257,8 +258,8 @@ export async function createQboInvoiceForOrder(
     }
   }
 
-  // Create invoice
-  const invoice = await createInvoice(client, {
+  // Build invoice payload (docNumber computed on each attempt in the retry loop below).
+  const invoicePayload = {
     customerId: customer.Id,
     customerName: customer.DisplayName,
     orderNumber,
@@ -285,7 +286,39 @@ export async function createQboInvoiceForOrder(
     salesChannelName: (order as any).sales_channel?.name,
     incomeItemRef,
     discountNote: orderDiscountTotal > 0 ? `Discount: -$${orderDiscountTotal.toFixed(2)}` : undefined,
-  })
+  }
+
+  // QBO's "Custom transaction numbers" is ON for this tenant, so DocNumber
+  // must be supplied explicitly. Compute next = max(existing numeric) + 1.
+  // Handle races (two invoices computing the same next number) by retrying
+  // with a fresh query on duplicate-DocNumber errors from QBO (code 6000 or
+  // error text containing "DocNumber" / "duplicate").
+  let invoice: QboInvoice | null = null
+  let lastDocNumber: string | null = null
+  for (let attempt = 0; attempt < 5; attempt++) {
+    // Pass attempt as offset so retries skip past the colliding number
+    // (avoids re-racing on the same value when the duplicate was one of
+    // our own concurrent creates).
+    const docNumber = await getNextInvoiceDocNumber(client, attempt)
+    lastDocNumber = docNumber
+    try {
+      invoice = await createInvoice(client, { ...invoicePayload, docNumber })
+      break
+    } catch (err) {
+      const isDupe =
+        err instanceof QboHttpError &&
+        /docnumber|duplicate|already|6140|6000/i.test(err.body || err.message)
+      if (!isDupe) throw err
+      logger.warn(
+        `[QBO Invoice] DocNumber ${docNumber} conflicted (attempt ${attempt + 1}/5), retrying with fresh number`
+      )
+    }
+  }
+  if (!invoice) {
+    throw new Error(
+      `Failed to create invoice after 5 attempts (last tried DocNumber ${lastDocNumber})`
+    )
+  }
 
   logger.info(
     `[QBO Invoice] Created invoice ${invoice.DocNumber} (ID: ${invoice.Id}) for order ${orderNumber}, total: ${invoice.TotalAmt}`

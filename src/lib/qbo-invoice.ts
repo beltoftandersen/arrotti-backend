@@ -91,6 +91,34 @@ export type InvoiceInput = {
   incomeItemRef?: { value: string; name: string }
   /** Discount note to include in PrivateNote (e.g., "Discount: -$5.00") */
   discountNote?: string
+  /** Explicit DocNumber — required when QBO's "Custom transaction numbers" setting is ON */
+  docNumber?: string
+}
+
+/**
+ * Compute the next numeric invoice DocNumber by inspecting recent QBO invoices.
+ * Assumes existing DocNumbers are numeric (ignores any that aren't).
+ * Starting seed if no numeric invoices exist: 1001.
+ *
+ * `offset` is added to the computed next number — used by the duplicate-retry
+ * loop in qbo-invoice-creator to break ties when two concurrent creates
+ * compute the same "next" number (each retry bumps the offset by one).
+ */
+export async function getNextInvoiceDocNumber(
+  client: QboClient,
+  offset = 0
+): Promise<string> {
+  const result = await client.query<{
+    QueryResponse: { Invoice?: Array<{ DocNumber?: string }> }
+  }>("SELECT DocNumber FROM Invoice ORDERBY MetaData.CreateTime DESC MAXRESULTS 200")
+
+  const numbers = (result.QueryResponse?.Invoice || [])
+    .map((i) => i.DocNumber)
+    .filter((n): n is string => !!n && /^\d+$/.test(n))
+    .map((n) => parseInt(n, 10))
+
+  const max = numbers.length > 0 ? Math.max(...numbers) : 1000
+  return String(max + 1 + offset)
 }
 
 /**
@@ -142,6 +170,10 @@ export async function createInvoice(
     Line: lines,
     PrivateNote: `${input.salesChannelName || "Online"} Order: ${input.orderNumber}${input.discountNote ? ` | ${input.discountNote}` : ""}`,
     GlobalTaxCalculation: "TaxExcluded",
+  }
+
+  if (input.docNumber) {
+    invoiceData.DocNumber = input.docNumber
   }
 
   // Add tax using QBO's native tax field (not as a line item)
