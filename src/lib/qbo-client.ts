@@ -4,6 +4,7 @@
  */
 
 import { getQboConfig, refreshAccessToken, calculateExpirationDates } from "./qbo-oauth"
+import { fetchWithRetry } from "./qbo-retry"
 
 type QboConnectionRecord = {
   id: string
@@ -80,29 +81,50 @@ export class QboClient {
   }
 
   /**
+   * Force a token refresh regardless of current expiration (used by retry
+   * wrapper when a request unexpectedly hits 401).
+   */
+  private async forceRefresh(): Promise<void> {
+    const connection = await this.connectionService.getConnection()
+    if (!connection) throw new Error("No QuickBooks connection found")
+    if (new Date(connection.refresh_token_expires_at) <= new Date()) {
+      throw new Error("QuickBooks connection expired. Please reconnect.")
+    }
+    console.log("[QBO] 401 received, forcing token refresh")
+    const tokens = await refreshAccessToken(connection.refresh_token)
+    const { accessTokenExpiresAt, refreshTokenExpiresAt } = calculateExpirationDates(
+      tokens.expires_in,
+      tokens.x_refresh_token_expires_in
+    )
+    await this.connectionService.updateTokens(
+      tokens.access_token,
+      tokens.refresh_token,
+      accessTokenExpiresAt,
+      refreshTokenExpiresAt
+    )
+  }
+
+  /**
    * Make an authenticated GET request to QBO API
    */
   async get<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
-    const { accessToken, realmId } = await this.getValidToken()
-
-    let url = `${this.config.apiBase}/v3/company/${realmId}/${endpoint}`
-    if (params) {
-      const searchParams = new URLSearchParams(params)
-      url += `?${searchParams.toString()}`
-    }
-
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
+    const response = await fetchWithRetry(
+      { label: `GET ${endpoint}`, detail: params ? JSON.stringify(params) : undefined },
+      async () => {
+        const { accessToken, realmId } = await this.getValidToken()
+        let url = `${this.config.apiBase}/v3/company/${realmId}/${endpoint}`
+        if (params) {
+          url += `?${new URLSearchParams(params).toString()}`
+        }
+        return fetch(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+          },
+        })
       },
-    })
-
-    if (!response.ok) {
-      const error = await response.text()
-      throw new Error(`QBO API GET ${endpoint} failed: ${error}`)
-    }
-
+      () => this.forceRefresh()
+    )
     return response.json()
   }
 
@@ -110,25 +132,23 @@ export class QboClient {
    * Make an authenticated POST request to QBO API
    */
   async post<T>(endpoint: string, data: unknown): Promise<T> {
-    const { accessToken, realmId } = await this.getValidToken()
-
-    const url = `${this.config.apiBase}/v3/company/${realmId}/${endpoint}`
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
+    const response = await fetchWithRetry(
+      { label: `POST ${endpoint}` },
+      async () => {
+        const { accessToken, realmId } = await this.getValidToken()
+        const url = `${this.config.apiBase}/v3/company/${realmId}/${endpoint}`
+        return fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(data),
+        })
       },
-      body: JSON.stringify(data),
-    })
-
-    if (!response.ok) {
-      const error = await response.text()
-      throw new Error(`QBO API POST ${endpoint} failed: ${error}`)
-    }
-
+      () => this.forceRefresh()
+    )
     return response.json()
   }
 
@@ -136,22 +156,20 @@ export class QboClient {
    * Query QBO entities using SQL-like syntax
    */
   async query<T>(query: string): Promise<T> {
-    const { accessToken, realmId } = await this.getValidToken()
-
-    const url = `${this.config.apiBase}/v3/company/${realmId}/query?query=${encodeURIComponent(query)}`
-
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
+    const response = await fetchWithRetry(
+      { label: "QBO query", detail: query.slice(0, 200) },
+      async () => {
+        const { accessToken, realmId } = await this.getValidToken()
+        const url = `${this.config.apiBase}/v3/company/${realmId}/query?query=${encodeURIComponent(query)}`
+        return fetch(url, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+          },
+        })
       },
-    })
-
-    if (!response.ok) {
-      const error = await response.text()
-      throw new Error(`QBO API Query failed: ${error}`)
-    }
-
+      () => this.forceRefresh()
+    )
     return response.json()
   }
 

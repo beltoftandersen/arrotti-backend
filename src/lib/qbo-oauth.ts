@@ -3,10 +3,8 @@
  */
 
 import crypto from "crypto"
-
-const QBO_AUTHORIZE_URL = "https://appcenter.intuit.com/connect/oauth2"
-const QBO_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
-const QBO_REVOKE_URL = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke"
+import { fetchWithRetry } from "./qbo-retry"
+import { getDiscoveryDocument } from "./qbo-discovery"
 
 // Sandbox vs Production base URLs
 const QBO_API_BASE = {
@@ -34,10 +32,12 @@ export function getQboConfig() {
 }
 
 /**
- * Generate the authorization URL to redirect user to Intuit login
+ * Generate the authorization URL to redirect user to Intuit login.
+ * Endpoint is resolved from Intuit's Discovery document.
  */
-export function getAuthorizationUrl(state: string): string {
+export async function getAuthorizationUrl(state: string): Promise<string> {
   const config = getQboConfig()
+  const discovery = await getDiscoveryDocument(config.environment)
 
   const params = new URLSearchParams({
     client_id: config.clientId,
@@ -47,7 +47,7 @@ export function getAuthorizationUrl(state: string): string {
     state,
   })
 
-  return `${QBO_AUTHORIZE_URL}?${params.toString()}`
+  return `${discovery.authorization_endpoint}?${params.toString()}`
 }
 
 /**
@@ -60,10 +60,11 @@ export async function exchangeCodeForTokens(code: string): Promise<{
   x_refresh_token_expires_in: number // seconds
 }> {
   const config = getQboConfig()
+  const discovery = await getDiscoveryDocument(config.environment)
 
   const credentials = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64")
 
-  const response = await fetch(QBO_TOKEN_URL, {
+  const response = await fetch(discovery.token_endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -95,26 +96,26 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
   x_refresh_token_expires_in: number
 }> {
   const config = getQboConfig()
+  const discovery = await getDiscoveryDocument(config.environment)
 
   const credentials = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64")
 
-  const response = await fetch(QBO_TOKEN_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${credentials}`,
-      Accept: "application/json",
-    },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-    }),
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`Failed to refresh token: ${error}`)
-  }
+  const response = await fetchWithRetry(
+    { label: "refreshToken", detail: "OAuth refresh_token grant" },
+    () =>
+      fetch(discovery.token_endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Basic ${credentials}`,
+          Accept: "application/json",
+        },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+        }),
+      })
+  )
 
   return response.json()
 }
@@ -124,10 +125,11 @@ export async function refreshAccessToken(refreshToken: string): Promise<{
  */
 export async function revokeToken(token: string): Promise<void> {
   const config = getQboConfig()
+  const discovery = await getDiscoveryDocument(config.environment)
 
   const credentials = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64")
 
-  await fetch(QBO_REVOKE_URL, {
+  await fetch(discovery.revocation_endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",

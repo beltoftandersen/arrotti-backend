@@ -12,7 +12,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     // The signature prevents forgery, timestamp prevents replay attacks
     const state = generateSignedOAuthState()
 
-    const authUrl = getAuthorizationUrl(state)
+    const authUrl = await getAuthorizationUrl(state)
 
     // Redirect to QuickBooks authorization page
     res.redirect(authUrl)
