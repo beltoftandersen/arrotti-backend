@@ -57,4 +57,59 @@ describe("resolvePoCustomFieldDefinitionId", () => {
     expect(result).toBe("1")
     expect(fake.queries[0]).toContain("FROM Preferences")
   })
+
+  it.each([
+    ["PO Number", "1"],
+    ["  purchase order number  ", "1"],
+    ["PO", "1"],
+    ["p.o. number", "1"],
+  ])("matches alias %j case-insensitively", async (label, expected) => {
+    const fake = new FakeQboClient([
+      {
+        QueryResponse: {
+          Preferences: [
+            {
+              SalesFormsPrefs: {
+                CustomField: [
+                  {
+                    CustomField: [
+                      { Name: "SalesFormsPrefs.UseSalesCustom1", Type: "BooleanType", BooleanValue: true },
+                      { Name: "SalesFormsPrefs.SalesCustomName1", Type: "StringType", StringValue: label },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    ])
+    expect(await resolvePoCustomFieldDefinitionId(asClient(fake))).toBe(expected)
+  })
+
+  it("ignores disabled slots even if the name matches", async () => {
+    const fake = new FakeQboClient([
+      {
+        QueryResponse: {
+          Preferences: [
+            {
+              SalesFormsPrefs: {
+                CustomField: [
+                  {
+                    CustomField: [
+                      { Name: "SalesFormsPrefs.UseSalesCustom1", Type: "BooleanType", BooleanValue: false },
+                      { Name: "SalesFormsPrefs.SalesCustomName1", Type: "StringType", StringValue: "PO Number" },
+                      { Name: "SalesFormsPrefs.UseSalesCustom2", Type: "BooleanType", BooleanValue: true },
+                      { Name: "SalesFormsPrefs.SalesCustomName2", Type: "StringType", StringValue: "Department" },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    ])
+    expect(await resolvePoCustomFieldDefinitionId(asClient(fake))).toBeNull()
+  })
 })
