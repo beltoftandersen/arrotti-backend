@@ -138,7 +138,7 @@ export async function createInvoice(
 
   const lines: Record<string, unknown>[] = input.lines.map((line, index) => ({
     LineNum: index + 1,
-    Description: line.sku ? `[${line.sku}] ${line.description}` : line.description,
+    Description: line.description,
     Amount: Math.round(line.quantity * line.unitPrice * 100) / 100,
     DetailType: "SalesItemLineDetail" as const,
     SalesItemLineDetail: {
