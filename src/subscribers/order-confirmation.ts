@@ -76,6 +76,12 @@ export default async function orderConfirmationHandler({
     // Detect pickup orders by shipping method name
     const isPickup = shippingMethods.some((m: any) => m.name === "Arrotti Group")
 
+    // Joined name(s) of the chosen shipping option — shown next to the Shipping total.
+    const shippingMethodLabel = shippingMethods
+      .map((m: any) => m?.name)
+      .filter((n: any): n is string => typeof n === "string" && n.trim().length > 0)
+      .join(", ")
+
     // Debug logging
     logger.info(`[Order Confirmation] Order ${order.id} - shipping_total: ${order.shipping_total}, tax_total: ${order.tax_total}`)
     logger.info(`[Order Confirmation] Shipping methods: ${JSON.stringify(shippingMethods)}`)
@@ -146,7 +152,7 @@ export default async function orderConfirmationHandler({
           </tr>
           ${!isPickup ? `
           <tr>
-            <td style="padding: 8px 0; color: #666;">Shipping</td>
+            <td style="padding: 8px 0; color: #666;">Shipping${shippingMethodLabel ? ` (${h(shippingMethodLabel)})` : ""}</td>
             <td style="padding: 8px 0; text-align: right;">${formatPrice(shippingTotal, order.currency_code)}</td>
           </tr>` : ""}
           ${order.discount_total ? `
@@ -206,7 +212,7 @@ export default async function orderConfirmationHandler({
         </div>
 
         <div style="text-align: center; margin-bottom: 30px;">
-          <h1 style="color: #007ffd; margin-bottom: 10px;">Order Confirmed!</h1>
+          <h1 style="color: #007ffd; margin-bottom: 10px;">Order Confirmed</h1>
           <p style="color: #666; font-size: 16px;">Thank you for your order</p>
         </div>
 
@@ -262,7 +268,7 @@ export default async function orderConfirmationHandler({
     `
 
     const text = isPickup ? `
-ORDER CONFIRMED!
+ORDER CONFIRMED
 
 Thank you for your order.
 
@@ -295,7 +301,7 @@ Questions? Contact us at info@arrottigroup.com
 
 © ${new Date().getFullYear()} Arrotti Group. All rights reserved.
     `.trim() : `
-ORDER CONFIRMED!
+ORDER CONFIRMED
 
 Thank you for your order.
 
@@ -312,7 +318,7 @@ ${items.map((item: any) => {
 }).join("\n")}
 
 Subtotal: ${formatPrice(order.subtotal, order.currency_code)}
-Shipping: ${formatPrice(shippingTotal, order.currency_code)}
+Shipping${shippingMethodLabel ? ` (${shippingMethodLabel})` : ""}: ${formatPrice(shippingTotal, order.currency_code)}
 ${order.discount_total ? `Discount: -${formatPrice(order.discount_total, order.currency_code)}\n` : ""}Tax: ${formatPrice(taxTotal, order.currency_code)}
 Total: ${formatPrice(order.total, order.currency_code)}
 
