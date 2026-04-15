@@ -151,6 +151,8 @@ export async function createQboInvoiceForOrder(
       "shipping_address.*",
       "billing_address.*",
       "shipping_methods.name",
+      "shipping_methods.amount",
+      "shipping_methods.total",
       "customer.first_name",
       "customer.last_name",
       "customer.phone",
@@ -287,26 +289,6 @@ export async function createQboInvoiceForOrder(
     itemRef: line.sku ? skuToItemRef.get(line.sku) : undefined,
   }))
 
-  // Shipping line uses a dedicated QBO Item on "Shipping Income".
-  const shippingAmount = toNumber(order.shipping_total)
-  let shippingItemRef: { value: string; name: string } | undefined
-  if (shippingAmount > 0 && shippingIncomeAcc) {
-    try {
-      shippingItemRef = await resolveShippingItem(client, {
-        name: QBO_SHIPPING_ITEM_NAME,
-        shippingIncomeAccount: shippingIncomeAcc,
-      })
-    } catch (err) {
-      logger.error(
-        `[QBO Invoice] Failed to resolve shipping item: ${(err as Error).message}`
-      )
-    }
-  } else if (shippingAmount > 0 && !shippingIncomeAcc) {
-    logger.warn(
-      `[QBO Invoice] Shipping charged but QBO account "${QBO_SHIPPING_INCOME_ACCOUNT_NAME}" not found — shipping line will use default account`
-    )
-  }
-
   // Look up payment terms - order metadata takes priority over customer metadata
   let salesTermRef: { value: string; name: string } | undefined
   const orderPaymentTermsDays = (order as any).metadata?.payment_terms_days
@@ -325,12 +307,48 @@ export async function createQboInvoiceForOrder(
   }
 
   // Shipping line description = joined names of the chosen shipping option(s).
-  const shippingMethodNames = ((order as any).shipping_methods || [])
+  const shippingMethods = ((order as any).shipping_methods || []) as Array<any>
+  const shippingMethodNames = shippingMethods
     .map((m: any) => m?.name)
     .filter((n: any): n is string => typeof n === "string" && n.trim().length > 0)
   const shippingDescription = shippingMethodNames.length > 0
     ? shippingMethodNames.join(", ")
     : undefined
+
+  // order.shipping_total comes back as 0 in Medusa V2 even when shipping was
+  // paid; mirror the fallback used in order-confirmation.ts and sum the
+  // individual method amounts when the aggregate is 0.
+  let shippingAmount = toNumber(order.shipping_total)
+  if (shippingAmount === 0 && shippingMethods.length > 0) {
+    shippingAmount = shippingMethods.reduce(
+      (sum: number, m: any) => sum + toNumber(m?.amount ?? m?.total),
+      0
+    )
+    if (shippingAmount > 0) {
+      logger.info(
+        `[QBO Invoice] order.shipping_total was 0; summed shipping_methods to $${shippingAmount.toFixed(2)}`
+      )
+    }
+  }
+
+  // Shipping line uses a dedicated QBO Item on "Shipping Income".
+  let shippingItemRef: { value: string; name: string } | undefined
+  if (shippingAmount > 0 && shippingIncomeAcc) {
+    try {
+      shippingItemRef = await resolveShippingItem(client, {
+        name: QBO_SHIPPING_ITEM_NAME,
+        shippingIncomeAccount: shippingIncomeAcc,
+      })
+    } catch (err) {
+      logger.error(
+        `[QBO Invoice] Failed to resolve shipping item: ${(err as Error).message}`
+      )
+    }
+  } else if (shippingAmount > 0 && !shippingIncomeAcc) {
+    logger.warn(
+      `[QBO Invoice] Shipping charged but QBO account "${QBO_SHIPPING_INCOME_ACCOUNT_NAME}" not found — shipping line will use default account`
+    )
+  }
 
   // Build invoice payload (docNumber computed on each attempt in the retry loop below).
   const invoicePayload = {
