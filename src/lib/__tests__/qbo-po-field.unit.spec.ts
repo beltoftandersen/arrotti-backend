@@ -109,6 +109,7 @@ describe("resolvePoCustomFieldDefinitionId", () => {
           ],
         },
       },
+      { QueryResponse: { Invoice: [] } }, // fallback — no invoices
     ])
     expect(await resolvePoCustomFieldDefinitionId(asClient(fake))).toBeNull()
   })
@@ -138,5 +139,40 @@ describe("resolvePoCustomFieldDefinitionId", () => {
     expect(first).toBe("1")
     expect(second).toBe("1")
     expect(fake.queries.length).toBe(1)
+  })
+
+  it("falls back to scanning recent invoices when Preferences has no match", async () => {
+    const fake = new FakeQboClient([
+      // Preferences — no PO slot enabled
+      {
+        QueryResponse: {
+          Preferences: [{ SalesFormsPrefs: { CustomField: [{ CustomField: [] }] } }],
+        },
+      },
+      // Invoice scan — a recent invoice carries a PO CustomField
+      {
+        QueryResponse: {
+          Invoice: [
+            {
+              Id: "999",
+              CustomField: [
+                { DefinitionId: "2", Name: "PO Number", Type: "StringType", StringValue: "ABC-1" },
+              ],
+            },
+          ],
+        },
+      },
+    ])
+    const result = await resolvePoCustomFieldDefinitionId(asClient(fake))
+    expect(result).toBe("2")
+    expect(fake.queries[1]).toContain("FROM Invoice")
+  })
+
+  it("returns null when neither Preferences nor recent invoices carry a PO field", async () => {
+    const fake = new FakeQboClient([
+      { QueryResponse: { Preferences: [{ SalesFormsPrefs: { CustomField: [{ CustomField: [] }] } }] } },
+      { QueryResponse: { Invoice: [{ Id: "999", CustomField: [] }] } },
+    ])
+    expect(await resolvePoCustomFieldDefinitionId(asClient(fake))).toBeNull()
   })
 })

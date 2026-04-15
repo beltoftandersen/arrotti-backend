@@ -61,6 +61,32 @@ async function resolveFromPreferences(client: QboClient): Promise<string | null>
   return null
 }
 
+type InvoiceScanResponse = {
+  QueryResponse?: {
+    Invoice?: Array<{
+      CustomField?: Array<{
+        DefinitionId?: string
+        Name?: string
+      }>
+    }>
+  }
+}
+
+async function resolveFromRecentInvoices(client: QboClient): Promise<string | null> {
+  const response = await client.query<InvoiceScanResponse>(
+    "SELECT Id, CustomField FROM Invoice ORDERBY MetaData.CreateTime DESC MAXRESULTS 20"
+  )
+  const invoices = response.QueryResponse?.Invoice ?? []
+  for (const inv of invoices) {
+    for (const cf of inv.CustomField ?? []) {
+      if (cf.DefinitionId && PO_FIELD_NAME_ALIASES.includes(normalizeName(cf.Name))) {
+        return cf.DefinitionId
+      }
+    }
+  }
+  return null
+}
+
 export async function resolvePoCustomFieldDefinitionId(
   client: QboClient
 ): Promise<string | null> {
@@ -68,6 +94,11 @@ export async function resolvePoCustomFieldDefinitionId(
     return cache.get(CACHE_KEY) ?? null
   }
   const fromPrefs = await resolveFromPreferences(client)
-  cache.set(CACHE_KEY, fromPrefs)
-  return fromPrefs
+  if (fromPrefs) {
+    cache.set(CACHE_KEY, fromPrefs)
+    return fromPrefs
+  }
+  const fromInvoices = await resolveFromRecentInvoices(client)
+  cache.set(CACHE_KEY, fromInvoices)
+  return fromInvoices
 }
