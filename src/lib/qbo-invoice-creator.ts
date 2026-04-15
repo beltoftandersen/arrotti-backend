@@ -12,6 +12,7 @@ import { QboHttpError } from "./qbo-retry"
 import { findOrCreateTermByDays } from "./qbo-terms"
 import { findAccountByName } from "./qbo-accounts"
 import { upsertInventoryItemByName, resolveShippingItem, type ItemAccountRefs } from "./qbo-item"
+import { resolvePoCustomFieldDefinitionId } from "./qbo-po-field"
 import { QBO_CONNECTION_MODULE } from "../modules/qbo-connection"
 import QboConnectionService from "../modules/qbo-connection/service"
 
@@ -229,6 +230,31 @@ export async function createQboInvoiceForOrder(
   const itemAccounts: ItemAccountRefs = { income: incomeAcc, cogs: cogsAcc, asset: assetAcc }
   const invStartDate = toDateString(order.created_at).split("T")[0]
 
+  // Read optional PO number stamped on the order at checkout.
+  const poNumber = (() => {
+    const raw = (order as any).metadata?.po_number
+    if (typeof raw !== "string") return undefined
+    const trimmed = raw.trim()
+    return trimmed.length > 0 ? trimmed.slice(0, 30) : undefined
+  })()
+
+  // Resolve the tenant's PO CustomField DefinitionId lazily (cached).
+  let poCustomFieldDefinitionId: string | null = null
+  if (poNumber) {
+    try {
+      poCustomFieldDefinitionId = await resolvePoCustomFieldDefinitionId(client)
+      if (!poCustomFieldDefinitionId) {
+        logger.warn(
+          `[QBO Invoice] PO "${poNumber}" on order ${orderNumber}: no P.O. Number CustomField detected in QBO — falling back to PrivateNote. Enable the P.O. Number custom field in QBO Company Settings → Sales → Custom fields on sales forms.`
+        )
+      }
+    } catch (err) {
+      logger.warn(
+        `[QBO Invoice] Failed to resolve PO CustomField DefinitionId: ${(err as Error).message} — falling back to PrivateNote`
+      )
+    }
+  }
+
   // Build invoice line items (use discounted prices so QBO tax is correct).
   // Per-line ItemRef comes from upserting an Inventory item keyed on variant SKU.
   const items = order.items || []
@@ -379,6 +405,8 @@ export async function createQboInvoiceForOrder(
     salesTermRef,
     salesChannelName: (order as any).sales_channel?.name,
     shippingItemRef,
+    poNumber,
+    poCustomFieldDefinitionId,
     discountNote: orderDiscountTotal > 0 ? `Discount: -$${orderDiscountTotal.toFixed(2)}` : undefined,
   }
 
