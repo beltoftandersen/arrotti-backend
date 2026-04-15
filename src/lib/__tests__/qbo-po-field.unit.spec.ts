@@ -112,4 +112,31 @@ describe("resolvePoCustomFieldDefinitionId", () => {
     ])
     expect(await resolvePoCustomFieldDefinitionId(asClient(fake))).toBeNull()
   })
+
+  it("caches the result across calls (single network query)", async () => {
+    const prefsResponse = {
+      QueryResponse: {
+        Preferences: [
+          {
+            SalesFormsPrefs: {
+              CustomField: [
+                {
+                  CustomField: [
+                    { Name: "SalesFormsPrefs.UseSalesCustom1", Type: "BooleanType", BooleanValue: true },
+                    { Name: "SalesFormsPrefs.SalesCustomName1", Type: "StringType", StringValue: "PO Number" },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      },
+    }
+    const fake = new FakeQboClient([prefsResponse, prefsResponse])
+    const first = await resolvePoCustomFieldDefinitionId(asClient(fake))
+    const second = await resolvePoCustomFieldDefinitionId(asClient(fake))
+    expect(first).toBe("1")
+    expect(second).toBe("1")
+    expect(fake.queries.length).toBe(1)
+  })
 })

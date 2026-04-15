@@ -64,6 +64,10 @@ async function resolveFromPreferences(client: QboClient): Promise<string | null>
 export async function resolvePoCustomFieldDefinitionId(
   client: QboClient
 ): Promise<string | null> {
+  if (cache.has(CACHE_KEY)) {
+    return cache.get(CACHE_KEY) ?? null
+  }
   const fromPrefs = await resolveFromPreferences(client)
+  cache.set(CACHE_KEY, fromPrefs)
   return fromPrefs
 }
