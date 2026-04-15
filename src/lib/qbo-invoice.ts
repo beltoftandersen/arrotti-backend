@@ -95,6 +95,10 @@ export type InvoiceInput = {
   incomeItemRef?: { value: string; name: string }
   /** Dedicated QBO Item for the Shipping line. Overrides incomeItemRef for shipping only. */
   shippingItemRef?: { value: string; name: string }
+  /** Customer PO number to stamp on the invoice. */
+  poNumber?: string
+  /** DefinitionId for the QBO CustomField that backs the tenant's P.O. Number box. Null/undefined = no CustomField written; falls back to PrivateNote. */
+  poCustomFieldDefinitionId?: string | null
   /** Discount note to include in PrivateNote (e.g., "Discount: -$5.00") */
   discountNote?: string
   /** Explicit DocNumber — required when QBO's "Custom transaction numbers" setting is ON */
@@ -180,6 +184,24 @@ export async function createInvoice(
 
   if (input.docNumber) {
     invoiceData.DocNumber = input.docNumber
+  }
+
+  // PO number — prefer the native CustomField when the tenant has it enabled;
+  // otherwise fall back to prepending "PO: <value>" onto PrivateNote so the
+  // information is still on the invoice for bookkeeping.
+  const poNumber = input.poNumber?.trim()
+  if (poNumber) {
+    if (input.poCustomFieldDefinitionId) {
+      invoiceData.CustomField = [
+        {
+          DefinitionId: input.poCustomFieldDefinitionId,
+          Type: "StringType",
+          StringValue: poNumber.slice(0, 30),
+        },
+      ]
+    } else {
+      invoiceData.PrivateNote = `PO: ${poNumber} | ${invoiceData.PrivateNote as string}`
+    }
   }
 
   // Add tax using QBO's native tax field (not as a line item)
