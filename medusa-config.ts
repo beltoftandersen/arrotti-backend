@@ -106,6 +106,11 @@ module.exports = defineConfig({
               webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
             },
           },
+          {
+            resolve: "./src/modules/payment-cod-zelle",
+            id: "cod-zelle",
+            options: {},
+          },
         ],
       },
     },
