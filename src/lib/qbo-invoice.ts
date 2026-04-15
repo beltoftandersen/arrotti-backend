@@ -69,6 +69,8 @@ export type InvoiceInput = {
   email?: string
   lines: InvoiceLineInput[]
   shippingAmount?: number
+  /** Description shown on the shipping invoice line — typically the chosen shipping option name(s). Falls back to "Shipping" if not provided. */
+  shippingDescription?: string
   taxAmount?: number
   billingAddress?: {
     address_1?: string
@@ -153,7 +155,7 @@ export async function createInvoice(
   if (input.shippingAmount && input.shippingAmount > 0) {
     lines.push({
       LineNum: lines.length + 1,
-      Description: "Shipping",
+      Description: input.shippingDescription || "Shipping",
       Amount: input.shippingAmount,
       DetailType: "SalesItemLineDetail",
       SalesItemLineDetail: {

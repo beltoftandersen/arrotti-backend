@@ -150,6 +150,7 @@ export async function createQboInvoiceForOrder(
       "items.variant.title",
       "shipping_address.*",
       "billing_address.*",
+      "shipping_methods.name",
       "customer.first_name",
       "customer.last_name",
       "customer.phone",
@@ -323,6 +324,14 @@ export async function createQboInvoiceForOrder(
     }
   }
 
+  // Shipping line description = joined names of the chosen shipping option(s).
+  const shippingMethodNames = ((order as any).shipping_methods || [])
+    .map((m: any) => m?.name)
+    .filter((n: any): n is string => typeof n === "string" && n.trim().length > 0)
+  const shippingDescription = shippingMethodNames.length > 0
+    ? shippingMethodNames.join(", ")
+    : undefined
+
   // Build invoice payload (docNumber computed on each attempt in the retry loop below).
   const invoicePayload = {
     customerId: customer.Id,
@@ -332,6 +341,7 @@ export async function createQboInvoiceForOrder(
     email: order.email,
     lines,
     shippingAmount,
+    shippingDescription,
     taxAmount: toNumber(order.tax_total),
     note: QBO_CUSTOMER_MEMO,
     billingAddress: billingAddress ? {
