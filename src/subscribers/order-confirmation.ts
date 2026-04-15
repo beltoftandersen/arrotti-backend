@@ -32,6 +32,7 @@ export default async function orderConfirmationHandler({
         "shipping_total",
         "tax_total",
         "discount_total",
+        "metadata",
         // Items - use wildcard to get quantity properly
         "items.*",
         "items.variant.sku",
