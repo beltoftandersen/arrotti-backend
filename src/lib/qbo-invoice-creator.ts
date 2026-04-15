@@ -240,7 +240,11 @@ export async function createQboInvoiceForOrder(
     const unitPrice = item.subtotal !== undefined && item.subtotal !== null
       ? Math.round((toNumber(item.subtotal) - discountExclTax) / qty * 100) / 100
       : toNumber(item.unit_price)
-    const description = item.title || item.variant?.title || "Product"
+    const productName = item.product_title || item.title || "Product"
+    const variantName = item.variant_title || item.variant?.title
+    const description = variantName && variantName !== productName
+      ? `${productName} - ${variantName}`
+      : productName
     const sku = item.variant?.sku || item.variant_sku
     return {
       sku,
