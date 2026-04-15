@@ -29,4 +29,32 @@ describe("resolvePoCustomFieldDefinitionId", () => {
     const result = await resolvePoCustomFieldDefinitionId(asClient(fake))
     expect(result).toBeNull()
   })
+
+  it("returns DefinitionId from Preferences.SalesFormsPrefs.CustomField by name", async () => {
+    const fake = new FakeQboClient([
+      {
+        QueryResponse: {
+          Preferences: [
+            {
+              SalesFormsPrefs: {
+                CustomField: [
+                  {
+                    CustomField: [
+                      { Name: "SalesFormsPrefs.UseSalesCustom1", Type: "BooleanType", BooleanValue: true },
+                      { Name: "SalesFormsPrefs.SalesCustomName1", Type: "StringType", StringValue: "P.O. Number" },
+                      { Name: "SalesFormsPrefs.UseSalesCustom2", Type: "BooleanType", BooleanValue: false },
+                      { Name: "SalesFormsPrefs.SalesCustomName2", Type: "StringType", StringValue: "" },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    ])
+    const result = await resolvePoCustomFieldDefinitionId(asClient(fake))
+    expect(result).toBe("1")
+    expect(fake.queries[0]).toContain("FROM Preferences")
+  })
 })
