@@ -10,19 +10,22 @@ import { createInvoice, getInvoice, deleteInvoice, voidInvoice, getNextInvoiceDo
 import type { QboInvoice } from "./qbo-invoice"
 import { QboHttpError } from "./qbo-retry"
 import { findOrCreateTermByDays } from "./qbo-terms"
-import { findItemByName } from "./qbo-accounts"
+import { findAccountByName } from "./qbo-accounts"
+import { upsertInventoryItemByName, resolveShippingItem, type ItemAccountRefs } from "./qbo-item"
 import { QBO_CONNECTION_MODULE } from "../modules/qbo-connection"
 import QboConnectionService from "../modules/qbo-connection/service"
 
 /**
- * Map sales channel name to QBO Item name for income account routing
- * Add entries here as you create corresponding products/services in QBO
+ * Invoice-level configuration. Accounts are resolved by Name at invoice time;
+ * per-variant QBO Items are upserted lazily on each order so we never touch
+ * the QBO catalog for SKUs that never sell.
  */
-const SALES_CHANNEL_TO_QBO_ITEM: Record<string, string> = {
-  "B2B Wholesale": "B2B Ecommerce Sales",
-  // Add more mappings as needed:
-  // "Default Sales Channel": "Ecommerce Sales",
-}
+const QBO_INCOME_ACCOUNT_NAME = "B2B Website Sales"
+const QBO_COGS_ACCOUNT_NAME = "Cost of goods sold"
+const QBO_ASSET_ACCOUNT_NAME = "Inventory"
+const QBO_SHIPPING_INCOME_ACCOUNT_NAME = "Shipping Income"
+const QBO_SHIPPING_ITEM_NAME = "Shipping"
+const QBO_CUSTOMER_MEMO = "OUR PRODUCTS ARE NEW AFTERMARKET"
 
 type InvoiceMetadata = {
   connected: boolean
@@ -205,10 +208,30 @@ export async function createQboInvoiceForOrder(
     } : undefined,
   })
 
-  // Build invoice line items (use discounted prices so QBO tax is correct)
+  // Resolve the four configured QBO accounts once per invoice (cached within qbo-accounts).
+  const [incomeAcc, cogsAcc, assetAcc, shippingIncomeAcc] = await Promise.all([
+    findAccountByName(client, QBO_INCOME_ACCOUNT_NAME),
+    findAccountByName(client, QBO_COGS_ACCOUNT_NAME),
+    findAccountByName(client, QBO_ASSET_ACCOUNT_NAME),
+    findAccountByName(client, QBO_SHIPPING_INCOME_ACCOUNT_NAME),
+  ])
+  if (!incomeAcc || !cogsAcc || !assetAcc) {
+    const missing = [
+      !incomeAcc && QBO_INCOME_ACCOUNT_NAME,
+      !cogsAcc && QBO_COGS_ACCOUNT_NAME,
+      !assetAcc && QBO_ASSET_ACCOUNT_NAME,
+    ].filter(Boolean).join(", ")
+    return { success: false, message: `Required QBO accounts not found: ${missing}` }
+  }
+  const itemAccounts: ItemAccountRefs = { income: incomeAcc, cogs: cogsAcc, asset: assetAcc }
+  const invStartDate = toDateString(order.created_at).split("T")[0]
+
+  // Build invoice line items (use discounted prices so QBO tax is correct).
+  // Per-line ItemRef comes from upserting an Inventory item keyed on variant SKU.
   const items = order.items || []
   const orderDiscountTotal = toNumber(order.discount_total)
-  const lines = items.map((item: any) => {
+  const skuToItemRef = new Map<string, { value: string; name: string }>()
+  const linesInput = items.map((item: any) => {
     const qty = toNumber(item.quantity) || 1
     const itemDiscount = toNumber(item.discount_total)
     const itemDiscountTax = toNumber(item.discount_tax_total)
@@ -218,15 +241,66 @@ export async function createQboInvoiceForOrder(
       ? Math.round((toNumber(item.subtotal) - discountExclTax) / qty * 100) / 100
       : toNumber(item.unit_price)
     const description = item.title || item.variant?.title || "Product"
+    const sku = item.variant?.sku || item.variant_sku
     return {
+      sku,
+      quantity: qty,
+      unitPrice,
       description: itemDiscount > 0
         ? `${description} (discount: -$${itemDiscount.toFixed(2)})`
         : description,
-      quantity: qty,
-      unitPrice,
-      sku: item.variant?.sku || item.variant_sku,
+      productDescription: description,
     }
   })
+
+  // JIT upsert one QBO Item per distinct SKU in this order (skip lines missing SKU).
+  for (const line of linesInput) {
+    if (!line.sku || skuToItemRef.has(line.sku)) continue
+    try {
+      const itemRef = await upsertInventoryItemByName(client, {
+        name: line.sku,
+        sku: line.sku,
+        description: line.productDescription,
+        unitPrice: line.unitPrice > 0 ? line.unitPrice : undefined,
+        invStartDate,
+        accounts: itemAccounts,
+      })
+      skuToItemRef.set(line.sku, itemRef)
+    } catch (err) {
+      logger.error(
+        `[QBO Invoice] Failed to upsert QBO item for SKU "${line.sku}": ${(err as Error).message}`
+      )
+      // Leave unmapped — the line falls through to input.incomeItemRef (undefined = QBO default).
+    }
+  }
+
+  const lines = linesInput.map((line) => ({
+    description: line.description,
+    quantity: line.quantity,
+    unitPrice: line.unitPrice,
+    sku: line.sku,
+    itemRef: line.sku ? skuToItemRef.get(line.sku) : undefined,
+  }))
+
+  // Shipping line uses a dedicated QBO Item on "Shipping Income".
+  const shippingAmount = toNumber(order.shipping_total)
+  let shippingItemRef: { value: string; name: string } | undefined
+  if (shippingAmount > 0 && shippingIncomeAcc) {
+    try {
+      shippingItemRef = await resolveShippingItem(client, {
+        name: QBO_SHIPPING_ITEM_NAME,
+        shippingIncomeAccount: shippingIncomeAcc,
+      })
+    } catch (err) {
+      logger.error(
+        `[QBO Invoice] Failed to resolve shipping item: ${(err as Error).message}`
+      )
+    }
+  } else if (shippingAmount > 0 && !shippingIncomeAcc) {
+    logger.warn(
+      `[QBO Invoice] Shipping charged but QBO account "${QBO_SHIPPING_INCOME_ACCOUNT_NAME}" not found — shipping line will use default account`
+    )
+  }
 
   // Look up payment terms - order metadata takes priority over customer metadata
   let salesTermRef: { value: string; name: string } | undefined
@@ -245,19 +319,6 @@ export async function createQboInvoiceForOrder(
     }
   }
 
-  // Look up QBO Item for income account based on sales channel
-  let incomeItemRef: { value: string; name: string } | undefined
-  const salesChannelName = (order as any).sales_channel?.name
-  if (salesChannelName) {
-    const qboItemName = SALES_CHANNEL_TO_QBO_ITEM[salesChannelName]
-    if (qboItemName) {
-      incomeItemRef = await findItemByName(client, qboItemName) || undefined
-      if (incomeItemRef) {
-        logger.info(`[QBO Invoice] Using income item "${qboItemName}" for sales channel "${salesChannelName}"`)
-      }
-    }
-  }
-
   // Build invoice payload (docNumber computed on each attempt in the retry loop below).
   const invoicePayload = {
     customerId: customer.Id,
@@ -266,8 +327,9 @@ export async function createQboInvoiceForOrder(
     orderDate: toDateString(order.created_at),
     email: order.email,
     lines,
-    shippingAmount: toNumber(order.shipping_total),
+    shippingAmount,
     taxAmount: toNumber(order.tax_total),
+    note: QBO_CUSTOMER_MEMO,
     billingAddress: billingAddress ? {
       address_1: billingAddress.address_1 || undefined,
       city: billingAddress.city || undefined,
@@ -284,7 +346,7 @@ export async function createQboInvoiceForOrder(
     } : undefined,
     salesTermRef,
     salesChannelName: (order as any).sales_channel?.name,
-    incomeItemRef,
+    shippingItemRef,
     discountNote: orderDiscountTotal > 0 ? `Discount: -$${orderDiscountTotal.toFixed(2)}` : undefined,
   }
 

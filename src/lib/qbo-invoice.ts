@@ -57,6 +57,8 @@ export type InvoiceLineInput = {
   quantity: number
   unitPrice: number
   sku?: string
+  /** Per-line ItemRef — overrides input.incomeItemRef for this line when set. */
+  itemRef?: { value: string; name: string }
 }
 
 export type InvoiceInput = {
@@ -87,8 +89,10 @@ export type InvoiceInput = {
   salesTermRef?: { value: string; name: string }
   /** Sales channel name (e.g., "B2B Wholesale", "Default Channel") */
   salesChannelName?: string
-  /** QBO Item/Service to use for line items (maps to income account) */
+  /** Fallback QBO Item/Service used for any line without its own itemRef (and for shipping if shippingItemRef is not set). */
   incomeItemRef?: { value: string; name: string }
+  /** Dedicated QBO Item for the Shipping line. Overrides incomeItemRef for shipping only. */
+  shippingItemRef?: { value: string; name: string }
   /** Discount note to include in PrivateNote (e.g., "Discount: -$5.00") */
   discountNote?: string
   /** Explicit DocNumber — required when QBO's "Custom transaction numbers" setting is ON */
@@ -138,7 +142,7 @@ export async function createInvoice(
     Amount: Math.round(line.quantity * line.unitPrice * 100) / 100,
     DetailType: "SalesItemLineDetail" as const,
     SalesItemLineDetail: {
-      ItemRef: input.incomeItemRef,
+      ItemRef: line.itemRef ?? input.incomeItemRef,
       Qty: line.quantity,
       UnitPrice: line.unitPrice,
       TaxCodeRef: taxCodeRef,
@@ -153,7 +157,7 @@ export async function createInvoice(
       Amount: input.shippingAmount,
       DetailType: "SalesItemLineDetail",
       SalesItemLineDetail: {
-        ItemRef: input.incomeItemRef,
+        ItemRef: input.shippingItemRef ?? input.incomeItemRef,
         Qty: 1,
         UnitPrice: input.shippingAmount,
         TaxCodeRef: taxCodeRef,
