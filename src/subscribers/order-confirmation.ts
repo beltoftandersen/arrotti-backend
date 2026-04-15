@@ -73,6 +73,13 @@ export default async function orderConfirmationHandler({
     const billingAddress = order.billing_address
     const shippingMethods = order.shipping_methods ?? []
 
+    const poNumber = (() => {
+      const raw = (order.metadata as any)?.po_number
+      if (typeof raw !== "string") return undefined
+      const trimmed = raw.trim()
+      return trimmed.length > 0 ? trimmed : undefined
+    })()
+
     // Detect pickup orders by shipping method name
     const isPickup = shippingMethods.some((m: any) => m.name === "Arrotti Group")
 
@@ -233,6 +240,7 @@ export default async function orderConfirmationHandler({
         `}
 
         <div style="background-color: #f9f9f9; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+          ${poNumber ? `<p style="margin: 0 0 8px;"><strong>PO Number:</strong> ${h(poNumber)}</p>` : ""}
           <p style="margin: 0;"><strong>Order Number:</strong> #${order.display_id || order.id}</p>
           <p style="margin: 8px 0 0;"><strong>Order Date:</strong> ${new Date(order.created_at).toLocaleDateString("en-US", {
             weekday: "long",
@@ -274,7 +282,7 @@ Thank you for your order.
 
 We're preparing your order for pickup. You'll receive an email or a call when your order is ready to be picked up. Please bring a valid ID and your order number.
 
-Order Number: #${order.display_id || order.id}
+${poNumber ? `PO Number: ${poNumber}\n` : ""}Order Number: #${order.display_id || order.id}
 Order Date: ${new Date(order.created_at).toLocaleDateString()}
 
 ORDER SUMMARY
@@ -307,7 +315,7 @@ Thank you for your order.
 
 We're preparing your order for shipment. You'll receive another email with tracking information once your order ships.
 
-Order Number: #${order.display_id || order.id}
+${poNumber ? `PO Number: ${poNumber}\n` : ""}Order Number: #${order.display_id || order.id}
 Order Date: ${new Date(order.created_at).toLocaleDateString()}
 
 ORDER SUMMARY
