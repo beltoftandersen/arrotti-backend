@@ -358,8 +358,11 @@ export async function createQboInvoiceForOrder(
   }
 
   // Shipping line uses a dedicated QBO Item on "Shipping Income".
+  // Always resolve when a shipping method exists (even at $0) so the method
+  // name appears on the invoice for Free Local Delivery / Pickup.
+  const hasShippingMethod = shippingMethods.length > 0
   let shippingItemRef: { value: string; name: string } | undefined
-  if (shippingAmount > 0 && shippingIncomeAcc) {
+  if (hasShippingMethod && shippingIncomeAcc) {
     try {
       shippingItemRef = await resolveShippingItem(client, {
         name: QBO_SHIPPING_ITEM_NAME,
@@ -370,9 +373,9 @@ export async function createQboInvoiceForOrder(
         `[QBO Invoice] Failed to resolve shipping item: ${(err as Error).message}`
       )
     }
-  } else if (shippingAmount > 0 && !shippingIncomeAcc) {
+  } else if (hasShippingMethod && !shippingIncomeAcc) {
     logger.warn(
-      `[QBO Invoice] Shipping charged but QBO account "${QBO_SHIPPING_INCOME_ACCOUNT_NAME}" not found — shipping line will use default account`
+      `[QBO Invoice] Shipping method present but QBO account "${QBO_SHIPPING_INCOME_ACCOUNT_NAME}" not found — shipping line will use default account`
     )
   }
 

@@ -235,7 +235,7 @@ Questions? Call us at (407) 286-0498 or email info@arrottigroup.com.
             ${shippingAddress.address_2 ? `${h(shippingAddress.address_2)}<br>` : ""}
             ${h(shippingAddress.city || "")}, ${h(shippingAddress.province || "")} ${h(shippingAddress.postal_code || "")}` : "N/A"
 
-      subject = `Your Order #${order.display_id || order.id} is Out for Delivery!`
+      subject = `Your Order #${order.display_id || order.id} is Out for Delivery`
 
       html = buildHtml(`
           <h1 style="color: #007ffd; margin-bottom: 10px;">Your Order is Out for Delivery!</h1>

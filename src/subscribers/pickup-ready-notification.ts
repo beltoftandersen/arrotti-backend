@@ -76,7 +76,7 @@ export default async function pickupReadyNotificationHandler({
         </tr>`
     }).join("")
 
-    const subject = `Your Order #${order.display_id || order.id} is Ready for Pickup!`
+    const subject = `Your Order #${order.display_id || order.id} is Ready for Pickup`
 
     const html = `
     <!DOCTYPE html>

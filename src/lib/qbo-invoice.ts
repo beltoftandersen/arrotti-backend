@@ -155,8 +155,8 @@ export async function createInvoice(
     },
   }))
 
-  // Add shipping as a line item if present
-  if (input.shippingAmount && input.shippingAmount > 0) {
+  // Add shipping as a line item if present (include $0 lines so the method name appears on the invoice)
+  if (input.shippingDescription) {
     lines.push({
       LineNum: lines.length + 1,
       Description: input.shippingDescription || "Shipping",
