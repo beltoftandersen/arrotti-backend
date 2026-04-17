@@ -3,7 +3,29 @@ import { AuthenticatedMedusaRequest, MedusaResponse } from "@medusajs/framework/
 import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import Stripe from "stripe"
 
-const STRIPE_PROVIDER_ID = "stripe"
+const STRIPE_PROVIDER_ID = "pp_stripe_stripe"
+
+async function getStripeAccountHolder(
+  customerId: string,
+  query: any
+) {
+  const { data: customers } = await query.graph({
+    entity: "customer",
+    fields: ["id", "account_holders.*"],
+    filters: {
+      id: customerId,
+    },
+  })
+
+  return (
+    customers?.[0]?.account_holders?.find(
+      (accountHolder: any) =>
+        accountHolder &&
+        accountHolder.provider_id === STRIPE_PROVIDER_ID &&
+        !accountHolder.deleted_at
+    ) ?? null
+  )
+}
 
 export async function DELETE(req: AuthenticatedMedusaRequest, res: MedusaResponse) {
   const customerId = req.auth_context?.actor_id
@@ -18,16 +40,8 @@ export async function DELETE(req: AuthenticatedMedusaRequest, res: MedusaRespons
   }
 
   const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
-  const { data: accountHolders } = await query.graph({
-    entity: "account_holder",
-    fields: ["external_id"],
-    filters: {
-      customer_id: customerId,
-      provider_id: STRIPE_PROVIDER_ID,
-    } as any,
-  })
-
-  const stripeCustomerId = accountHolders?.[0]?.external_id
+  const accountHolder = await getStripeAccountHolder(customerId, query)
+  const stripeCustomerId = accountHolder?.external_id
   if (!stripeCustomerId) {
     return res.status(404).json({ message: "No saved payment methods" })
   }

@@ -2,7 +2,29 @@
 import type { AuthenticatedMedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 
-const STRIPE_PROVIDER_ID = "stripe"
+const STRIPE_PROVIDER_ID = "pp_stripe_stripe"
+
+async function getStripeAccountHolder(
+  customerId: string,
+  query: any
+) {
+  const { data: customers } = await query.graph({
+    entity: "customer",
+    fields: ["id", "account_holders.*"],
+    filters: {
+      id: customerId,
+    },
+  })
+
+  return (
+    customers?.[0]?.account_holders?.find(
+      (accountHolder: any) =>
+        accountHolder &&
+        accountHolder.provider_id === STRIPE_PROVIDER_ID &&
+        !accountHolder.deleted_at
+    ) ?? null
+  )
+}
 
 export async function GET(req: AuthenticatedMedusaRequest, res: MedusaResponse) {
   const customerId = req.auth_context?.actor_id
@@ -12,17 +34,7 @@ export async function GET(req: AuthenticatedMedusaRequest, res: MedusaResponse) 
 
   const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
   const paymentModule = req.scope.resolve(Modules.PAYMENT)
-
-  const { data: accountHolders } = await query.graph({
-    entity: "account_holder",
-    fields: ["id", "provider_id", "external_id", "data", "metadata"],
-    filters: {
-      customer_id: customerId,
-      provider_id: STRIPE_PROVIDER_ID,
-    } as any,
-  })
-
-  const accountHolder = accountHolders?.[0]
+  const accountHolder = await getStripeAccountHolder(customerId, query)
 
   if (!accountHolder) {
     return res.json({ payment_methods: [] })
