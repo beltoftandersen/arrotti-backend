@@ -58,7 +58,7 @@ export default async function orderAdminNotificationHandler({
     const items = order.items ?? []
     const shippingAddress = order.shipping_address as any
     const shippingMethods = (order.shipping_methods ?? []) as any[]
-    const isPickup = shippingMethods.some((m: any) => m.name === "Arrotti Group")
+    const isPickup = shippingMethods.some((m: any) => m.name?.startsWith("Arrotti Group"))
     const totalQty = items.reduce((sum: number, item: any) => sum + (toNumber(item.quantity) || 1), 0)
 
     const itemsHtml = items.map((item: any) => {

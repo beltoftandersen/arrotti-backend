@@ -69,6 +69,7 @@ interface ImportRow {
   oeprice: number | null
   cost_price: string   // '0.00' when no KSI
   ksi_no: string | null
+  ksi_part_desc: string | null
   ksi_qty: string       // '0', '1', '5+' etc
   ksi_district_qty: string
   has_ksi: boolean
@@ -96,6 +97,7 @@ interface GroupedProduct {
     link_suffix: string | null
     cost_price: string
     ksi_no: string | null
+    ksi_part_desc: string | null
     ksi_qty: string
     ksi_district_qty: string
     has_ksi: boolean
@@ -433,6 +435,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
         link_suffix: row.link_suffix,
         cost_price: row.cost_price,
         ksi_no: row.ksi_no,
+        ksi_part_desc: row.ksi_part_desc,
         ksi_qty: row.ksi_qty,
         ksi_district_qty: row.ksi_district_qty,
         has_ksi: row.has_ksi,
@@ -598,6 +601,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
             allow_backorder: false,
             metadata: {
               ksi_no: v.ksi_no,
+              ksi_part_desc: v.ksi_part_desc,
               hollander_no: group.hollander_no,
             },
           })
@@ -911,6 +915,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
                 allow_backorder: false,
                 metadata: {
                   ksi_no: sourceVariant.ksi_no,
+                  ksi_part_desc: sourceVariant.ksi_part_desc,
                   hollander_no: group.hollander_no,
                 },
               }])
@@ -1000,6 +1005,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
             const oldVMeta = matchedVariant.metadata || {}
             const variantDirty =
               String(oldVMeta.ksi_no ?? "") !== String(sourceVariant.ksi_no ?? "") ||
+              String(oldVMeta.ksi_part_desc ?? "") !== String(sourceVariant.ksi_part_desc ?? "") ||
               String(oldVMeta.hollander_no ?? "") !== String(group.hollander_no ?? "") ||
               matchedVariant.manage_inventory !== true ||
               matchedVariant.allow_backorder !== false
@@ -1009,6 +1015,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
                 metadata: {
                   ...(matchedVariant.metadata || {}),
                   ksi_no: sourceVariant.ksi_no,
+                  ksi_part_desc: sourceVariant.ksi_part_desc,
                   hollander_no: group.hollander_no,
                 },
                 manage_inventory: true,

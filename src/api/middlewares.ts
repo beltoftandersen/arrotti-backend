@@ -4,8 +4,13 @@ import {
   MedusaRequest,
   MedusaResponse,
 } from "@medusajs/framework/http"
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import rateLimit from "express-rate-limit"
 import multer from "multer"
+import {
+  BLOCKED_CAPTURE_MESSAGE,
+  isBlockedCaptureProvider,
+} from "../lib/blocked-capture-providers"
 
 // Multer for file uploads (memory storage for small files)
 const upload = multer({
@@ -150,6 +155,40 @@ const cacheControl = (maxAge: number, swr = 3600) => {
   }
 }
 
+// Block admin capture-payment for externally-paid providers (Zelle/Cash/Check).
+// Those providers reconcile through QuickBooks; a Medusa capture is a no-op
+// that only desynchronises the Medusa payment state from the source of truth.
+const blockExternalCapture = async (
+  req: MedusaRequest,
+  res: MedusaResponse,
+  next: MedusaNextFunction
+) => {
+  const paymentId = req.params.id
+  if (!paymentId) return next()
+
+  try {
+    const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
+    const {
+      data: [payment],
+    } = await query.graph({
+      entity: "payment",
+      fields: ["id", "provider_id"],
+      filters: { id: paymentId },
+    })
+
+    if (payment && isBlockedCaptureProvider((payment as any).provider_id)) {
+      return res.status(400).json({
+        type: "not_allowed",
+        message: BLOCKED_CAPTURE_MESSAGE,
+      })
+    }
+  } catch {
+    // If the lookup fails, fall through so legitimate captures aren't broken.
+  }
+
+  return next()
+}
+
 export default defineMiddlewares({
   routes: [
     // QuickBooks webhook — preserve raw body for HMAC signature verification
@@ -157,6 +196,13 @@ export default defineMiddlewares({
       matcher: "/webhooks/quickbooks",
       method: ["POST"],
       bodyParser: { preserveRawBody: true },
+    },
+    // Block Medusa-side capture for externally-paid providers (Zelle/Cash/Check).
+    // See src/lib/blocked-capture-providers.ts for the provider list + rationale.
+    {
+      matcher: "/admin/payments/:id/capture",
+      method: ["POST"],
+      middlewares: [blockExternalCapture],
     },
     // Admin variant supplier routes - allow custom body fields
     {

@@ -16,7 +16,7 @@ import QboConnectionService from "../modules/qbo-connection/service"
  * QBO deposit account name - payments will be deposited here
  * Set to null to use QBO's default "Undeposited Funds"
  */
-const QBO_DEPOSIT_ACCOUNT = "Checking"
+const QBO_DEPOSIT_ACCOUNT = "Checking Account"
 
 type PaymentCapturedData = {
   id: string
@@ -48,6 +48,7 @@ export default async function qboPaymentHandler({
         "currency_code",
         "captured_at",
         "provider_id",
+        "data",
         "payment_collection.order.id",
         "payment_collection.order.display_id",
         "payment_collection.order.metadata",
@@ -116,7 +117,18 @@ export default async function qboPaymentHandler({
 
     // Build note similar to invoice format: "{Sales Channel} Payment: {order number}"
     const salesChannelName = order.sales_channel?.name || "Online"
-    const paymentNote = `${salesChannelName} Payment: ${orderNumber}`
+    let paymentNote = `${salesChannelName} Payment: ${orderNumber}`
+
+    // If Stripe, use the PaymentIntent id (pi_xxx) as the reference.
+    // PaymentRefNum is capped at 21 chars by QBO, so keep the full id in PrivateNote too.
+    const stripeTxnId = typeof (payment as any).data?.id === "string"
+      ? ((payment as any).data.id as string)
+      : undefined
+    const isStripeTxn = stripeTxnId?.startsWith("pi_") ?? false
+    const paymentRefNum = isStripeTxn ? stripeTxnId! : `Order ${orderNumber}`
+    if (isStripeTxn) {
+      paymentNote = `${paymentNote} | Stripe: ${stripeTxnId}`
+    }
 
     // Look up deposit account
     let depositAccountRef: { value: string; name: string } | undefined
@@ -133,7 +145,7 @@ export default async function qboPaymentHandler({
       invoiceId: invoice.Id,
       amount: amountToApply,
       paymentDate: paymentDateStr,
-      paymentReference: `Order ${orderNumber}`,
+      paymentReference: paymentRefNum,
       paymentMethod: (payment as any).provider_id || "stripe",
       note: paymentNote,
       depositAccountRef,

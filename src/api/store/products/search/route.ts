@@ -404,10 +404,6 @@ export async function GET(req: MedusaStoreRequest, res: MedusaResponse) {
     filterParts.push(`avg_rating >= ${minRatingValue}`)
   }
 
-  if (filterParts.length) {
-    searchOptions.filter = filterParts.join(" AND ")
-  }
-
   // Handle sorting - support both 'order' and 'sort' parameters
   // Format: "created_at" or "created_at:desc" or "title:asc"
   const sortParam = (typeof order === "string" ? order : typeof sort === "string" ? sort : "").trim()
@@ -429,6 +425,16 @@ export async function GET(req: MedusaStoreRequest, res: MedusaResponse) {
         sort: [sortValue],
       }
     }
+  }
+
+  // When sorting by price, hide products with no real price data so
+  // unpriced / quote-only items don't dominate the top of the asc list.
+  if (sortParam === "price_asc" || sortParam === "price_desc") {
+    filterParts.push("price_cents > 0")
+  }
+
+  if (filterParts.length) {
+    searchOptions.filter = filterParts.join(" AND ")
   }
 
   // --- Exact match phase for part-number-like queries ---

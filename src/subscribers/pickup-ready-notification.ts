@@ -21,7 +21,8 @@ export default async function pickupReadyNotificationHandler({
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
   const notificationModuleService = container.resolve("notification")
 
-  if (data.no_notification) return
+  // Note: we intentionally ignore data.no_notification for pickup orders
+  // because the "Ready for Pickup" email is essential for the customer.
 
   try {
     const { data: [order] } = await query.graph({
@@ -49,7 +50,7 @@ export default async function pickupReadyNotificationHandler({
 
     // Only handle pickup orders
     const shippingMethods = (order.shipping_methods ?? []) as any[]
-    const isPickup = shippingMethods.some((m: any) => m.name === "Arrotti Group")
+    const isPickup = shippingMethods.some((m: any) => m.name?.startsWith("Arrotti Group"))
     if (!isPickup) return
 
     if (!order.email) {

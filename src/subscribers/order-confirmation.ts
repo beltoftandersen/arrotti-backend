@@ -82,7 +82,7 @@ export default async function orderConfirmationHandler({
     })()
 
     // Detect pickup orders by shipping method name
-    const isPickup = shippingMethods.some((m: any) => m.name === "Arrotti Group")
+    const isPickup = shippingMethods.some((m: any) => m.name?.startsWith("Arrotti Group"))
 
     // Joined name(s) of the chosen shipping option — shown next to the Shipping total.
     const shippingMethodLabel = shippingMethods

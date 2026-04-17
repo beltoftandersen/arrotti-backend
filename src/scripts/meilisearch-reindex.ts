@@ -65,6 +65,7 @@ const SEARCHABLE_ATTRIBUTES = [
   "title",
   "vehicle",
   "description",
+  "ksi_part_desc",
   "fitment_text",
   "oem_number",
   "partslink_no",
@@ -360,27 +361,37 @@ export default async function meilisearchReindex({
   const ratingByProduct = await productReviewService.getAllAverageRatings()
   console.log(`[reindex] Built rating map for ${ratingByProduct.size} products (${(performance.now() - ratingStart).toFixed(0)}ms)`)
 
-  // Load ALL variant SKUs
-  console.log("[reindex] Loading all variant SKUs...")
+  // Load ALL variant SKUs + ksi_part_desc
+  console.log("[reindex] Loading all variant SKUs and ksi_part_desc...")
   const skuStart = performance.now()
   const skusByProduct = new Map<string, string[]>()
+  const ksiPartDescsByProduct = new Map<string, Set<string>>()
   try {
     const db = container.resolve("__pg_connection__")
     const skuRows = await db.raw(
-      `SELECT product_id, sku FROM product_variant WHERE sku IS NOT NULL AND deleted_at IS NULL`
+      `SELECT product_id, sku, metadata->>'ksi_part_desc' AS ksi_part_desc
+       FROM product_variant
+       WHERE deleted_at IS NULL`
     )
     for (const row of skuRows?.rows ?? skuRows ?? []) {
-      if (row.product_id && row.sku) {
+      if (!row.product_id) continue
+      if (row.sku) {
         if (!skusByProduct.has(row.product_id)) {
           skusByProduct.set(row.product_id, [])
         }
         skusByProduct.get(row.product_id)!.push(row.sku)
       }
+      if (row.ksi_part_desc) {
+        if (!ksiPartDescsByProduct.has(row.product_id)) {
+          ksiPartDescsByProduct.set(row.product_id, new Set())
+        }
+        ksiPartDescsByProduct.get(row.product_id)!.add(row.ksi_part_desc)
+      }
     }
   } catch (e) {
-    console.warn(`[reindex] Could not load variant SKUs: ${e}`)
+    console.warn(`[reindex] Could not load variant SKUs/ksi_part_desc: ${e}`)
   }
-  console.log(`[reindex] Built SKU map for ${skusByProduct.size} products (${(performance.now() - skuStart).toFixed(0)}ms)`)
+  console.log(`[reindex] Built SKU map for ${skusByProduct.size} products, ksi_part_desc map for ${ksiPartDescsByProduct.size} products (${(performance.now() - skuStart).toFixed(0)}ms)`)
 
   // === PHASE 2: Process products in batches ===
   console.log("[reindex] Processing products...")
@@ -519,6 +530,7 @@ export default async function meilisearchReindex({
       const priceCents = priceByProduct.get(product.id) ?? null
       const avgRating = ratingByProduct.get(product.id) ?? 0
       const variantSkus = skusByProduct.get(product.id) ?? []
+      const ksiPartDesc = Array.from(ksiPartDescsByProduct.get(product.id) ?? [])
 
       return {
         id: product.id,
@@ -541,6 +553,7 @@ export default async function meilisearchReindex({
         oem_number: oemNumber,
         partslink_no: partslinkNo,
         variant_skus: variantSkus,
+        ksi_part_desc: ksiPartDesc,
         created_at: createdAtTimestamp,
         price_cents: priceCents,
         avg_rating: avgRating,
