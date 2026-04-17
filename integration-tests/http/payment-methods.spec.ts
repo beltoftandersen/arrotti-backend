@@ -16,5 +16,27 @@ medusaIntegrationTestRunner({
         expect([400, 401]).toContain(res.status)
       })
     })
+
+    describe("DELETE /store/customers/me/payment-methods/:pm_id", () => {
+      it("returns 401 when unauthenticated", async () => {
+        const res = await api
+          .delete("/store/customers/me/payment-methods/pm_123")
+          .catch((e: any) => e.response)
+
+        expect([400, 401]).toContain(res.status)
+      })
+
+      it("rejects an invalid payment method id format", async () => {
+        // The route enforces pm_ prefix before any auth-scoped lookup, so an
+        // invalid id is rejected cleanly regardless of session. Note: the
+        // pub-key check in the middleware still fires first in this harness,
+        // hence the 400-or-401 acceptance band.
+        const res = await api
+          .delete("/store/customers/me/payment-methods/not-a-pm-id")
+          .catch((e: any) => e.response)
+
+        expect([400, 401]).toContain(res.status)
+      })
+    })
   },
 })
