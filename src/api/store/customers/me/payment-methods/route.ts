@@ -1,40 +1,15 @@
 // my-medusa-store/src/api/store/customers/me/payment-methods/route.ts
 import type { AuthenticatedMedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
-
-const STRIPE_PROVIDER_ID = "pp_stripe_stripe"
-
-async function getStripeAccountHolder(
-  customerId: string,
-  query: any
-) {
-  const { data: customers } = await query.graph({
-    entity: "customer",
-    fields: ["id", "account_holders.*"],
-    filters: {
-      id: customerId,
-    },
-  })
-
-  return (
-    customers?.[0]?.account_holders?.find(
-      (accountHolder: any) =>
-        accountHolder &&
-        accountHolder.provider_id === STRIPE_PROVIDER_ID &&
-        !accountHolder.deleted_at
-    ) ?? null
-  )
-}
+import { Modules } from "@medusajs/framework/utils"
+import { getStripeAccountHolder, STRIPE_PROVIDER_ID } from "./utils"
 
 export async function GET(req: AuthenticatedMedusaRequest, res: MedusaResponse) {
-  const customerId = req.auth_context?.actor_id
-  if (!customerId) {
+  if (!req.auth_context?.actor_id) {
     return res.status(401).json({ message: "Unauthorized" })
   }
 
-  const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
   const paymentModule = req.scope.resolve(Modules.PAYMENT)
-  const accountHolder = await getStripeAccountHolder(customerId, query)
+  const accountHolder = await getStripeAccountHolder(req)
 
   if (!accountHolder) {
     return res.json({ payment_methods: [] })
