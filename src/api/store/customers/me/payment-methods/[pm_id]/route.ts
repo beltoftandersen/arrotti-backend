@@ -12,6 +12,7 @@ export async function DELETE(req: AuthenticatedMedusaRequest, res: MedusaRespons
   }
 
   const { pm_id } = req.params
+  // Format check only — real authorization is the pm.customer comparison below.
   if (!pm_id || !pm_id.startsWith("pm_")) {
     return res.status(400).json({ message: "Invalid payment method id" })
   }
@@ -45,8 +46,13 @@ export async function DELETE(req: AuthenticatedMedusaRequest, res: MedusaRespons
     await stripe.paymentMethods.detach(pm_id)
     return res.json({ deleted: true, id: pm_id })
   } catch (err) {
-    const msg = (err as Error).message
-    req.scope.resolve("logger").error(`[payment-methods] detach failed: ${msg}`)
+    const e = err as Stripe.errors.StripeError
+    if (e?.code === "resource_missing") {
+      return res.status(404).json({ message: "Payment method not found" })
+    }
+    req.scope.resolve("logger").error(
+      `[payment-methods] detach failed: ${e?.message ?? String(err)}`
+    )
     return res.status(500).json({ message: "Failed to detach card" })
   }
 }
