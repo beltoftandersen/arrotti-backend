@@ -161,6 +161,28 @@ export type Label = {
     png: string
     zpl: string
   }
+  packages?: Array<{
+    package_id?: number
+    package_code?: string
+    tracking_number?: string
+    weight?: {
+      value: number
+      unit: string
+    }
+    dimensions?: {
+      length: number
+      width: number
+      height: number
+      unit: string
+    }
+    label_download?: {
+      href?: string
+      pdf?: string
+      png?: string
+      zpl?: string
+    }
+    [k: string]: unknown
+  }>
 }
 
 export type VoidLabelResponse = {

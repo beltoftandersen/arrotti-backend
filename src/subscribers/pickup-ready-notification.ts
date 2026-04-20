@@ -110,15 +110,14 @@ export default async function pickupReadyNotificationHandler({
         </p>
         <p style="margin: 8px 0 0; color: #666;">
           <strong>Business Hours:</strong><br>
-          Mon–Fri: 8AM – 6PM EST<br>
-          Sat: 9AM – 2PM EST
+          Mon–Fri: 9AM – 5PM EST
         </p>
       </div>
 
       <div style="background-color: #f0f7ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
         <h3 style="color: #007ffd; margin: 0 0 10px;">What to Bring</h3>
         <ul style="margin: 0; padding-left: 20px; color: #666;">
-          <li>A valid photo ID</li>
+          <li>Invoice</li>
           <li>Your order number: <strong>#${order.display_id || order.id}</strong></li>
         </ul>
       </div>
@@ -165,11 +164,10 @@ Arrotti Group
 Orlando, FL 32811
 
 Business Hours:
-Mon-Fri: 8AM - 6PM EST
-Sat: 9AM - 2PM EST
+Mon-Fri: 9AM - 5PM EST
 
 WHAT TO BRING
-- A valid photo ID
+- Invoice
 - Your order number: #${order.display_id || order.id}
 
 ORDER SUMMARY

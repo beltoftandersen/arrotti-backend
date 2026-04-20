@@ -82,14 +82,19 @@ export default async function shipmentNotificationHandler({
     // Get tracking info from fulfillment labels
     let trackingNumber: string | null = null
     let trackingUrl: string | null = null
+    let trackingEntries: Array<{ number: string; url: string | null }> = []
     try {
       const { data: [ful] } = await query.graph({
         entity: "fulfillment",
         fields: ["labels.tracking_number", "labels.tracking_url"],
         filters: { id: data.id },
       })
-      trackingNumber = (ful as any)?.labels?.[0]?.tracking_number || null
-      trackingUrl = (ful as any)?.labels?.[0]?.tracking_url || null
+      const labels = ((ful as any)?.labels ?? []) as Array<{ tracking_number?: string; tracking_url?: string }>
+      trackingEntries = labels
+        .filter((l) => !!l?.tracking_number)
+        .map((l) => ({ number: l.tracking_number as string, url: l.tracking_url || null }))
+      trackingNumber = trackingEntries[0]?.number || null
+      trackingUrl = trackingEntries[0]?.url || null
     } catch {
       logger.debug(`[Shipment Notification] Could not fetch tracking info for fulfillment ${data.id}`)
     }
@@ -293,13 +298,22 @@ Questions? Call us at (407) 286-0498 or email info@arrottigroup.com.
             ${shippingAddress.address_2 ? `${h(shippingAddress.address_2)}<br>` : ""}
             ${h(shippingAddress.city || "")}, ${h(shippingAddress.province || "")} ${h(shippingAddress.postal_code || "")}` : "N/A"
 
-      const trackingHtml = trackingNumber ? `
+      const multi = trackingEntries.length > 1
+      const trackingRowsHtml = trackingEntries
+        .map((t, i) => {
+          const label = multi ? `Package ${i + 1}: ` : ""
+          const linkHtml = t.url
+            ? ` <a href="${escapeUrl(t.url)}" style="color: #007ffd; text-decoration: underline;">Track</a>`
+            : ""
+          return `<p style="margin: 0 0 8px; color: #666;"><strong>${h(label)}</strong>${h(t.number)}${linkHtml}</p>`
+        })
+        .join("")
+
+      const trackingHtml = trackingEntries.length > 0 ? `
           <div style="background-color: #f0f7ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-            <h3 style="color: #007ffd; margin: 0 0 10px;">Tracking Information</h3>
-            <p style="margin: 0 0 8px; color: #666;">
-              <strong>Tracking Number:</strong> ${h(trackingNumber)}
-            </p>
-            ${trackingUrl ? `
+            <h3 style="color: #007ffd; margin: 0 0 10px;">Tracking Information${multi ? ` (${trackingEntries.length} packages)` : ""}</h3>
+            ${trackingRowsHtml}
+            ${!multi && trackingUrl ? `
             <a href="${escapeUrl(trackingUrl)}"
                style="display: inline-block; background-color: #007ffd; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; margin-top: 8px;">
               Track Your Package
@@ -335,9 +349,12 @@ Questions? Call us at (407) 286-0498 or email info@arrottigroup.com.
 Order #${order.display_id || order.id}
 
 Your order has been shipped via ${carrierName} and is on its way!
-${trackingNumber ? `
-TRACKING INFORMATION
-Tracking Number: ${trackingNumber}${trackingUrl ? `\nTrack your package: ${trackingUrl}` : ""}
+${trackingEntries.length > 0 ? `
+TRACKING INFORMATION${trackingEntries.length > 1 ? ` (${trackingEntries.length} packages)` : ""}
+${trackingEntries.map((t, i) => {
+  const label = trackingEntries.length > 1 ? `Package ${i + 1}: ` : "Tracking Number: "
+  return `${label}${t.number}${t.url ? `\n  Track: ${t.url}` : ""}`
+}).join("\n")}
 ` : ""}
 SHIPPING ADDRESS
 ${addressText}

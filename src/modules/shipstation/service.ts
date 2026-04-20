@@ -496,12 +496,7 @@ class ShipStationProviderService extends AbstractFulfillmentProviderService {
           province: originalShipment.ship_from.state_province,
         },
       },
-      to_address: {
-        ...originalShipment.ship_to,
-        address_1: originalShipment.ship_to.address_line1,
-        city: originalShipment.ship_to.city_locality,
-        province: originalShipment.ship_to.state_province,
-      },
+      to_address: (order as any).shipping_address,
       items: orderItemsToFulfill as OrderLineItemDTO[],
       currency_code: (order as any).currency_code,
     })
@@ -510,21 +505,48 @@ class ShipStationProviderService extends AbstractFulfillmentProviderService {
       newShipment.shipment_id
     )
 
+    const combinedLabelUrl = label.label_download?.pdf || label.label_download?.href || ""
+    const packageTrackingNumbers = (label.packages ?? [])
+      .map((p) => p.tracking_number)
+      .filter((t): t is string => !!t)
+
+    const labels =
+      packageTrackingNumbers.length > 1
+        ? label.packages!
+            .map((p, idx) => {
+              const tn = p.tracking_number
+              if (!tn) return null
+              return {
+                tracking_number: tn,
+                tracking_url: `https://track.shipstation.com/${tn}`,
+                label_url:
+                  p.label_download?.pdf ||
+                  p.label_download?.href ||
+                  (idx === 0 ? combinedLabelUrl : ""),
+              }
+            })
+            .filter((l): l is NonNullable<typeof l> => l !== null)
+        : [
+            {
+              tracking_number: label.tracking_number,
+              tracking_url: label.tracking_number
+                ? `https://track.shipstation.com/${label.tracking_number}`
+                : "",
+              label_url: combinedLabelUrl,
+            },
+          ]
+
     return {
       data: {
         ...((fulfillment.data as object) || {}),
         label_id: label.label_id,
         shipment_id: label.shipment_id,
+        package_count: packageTrackingNumbers.length || 1,
+        tracking_numbers: packageTrackingNumbers.length > 0
+          ? packageTrackingNumbers
+          : [label.tracking_number],
       },
-      labels: [
-        {
-          tracking_number: label.tracking_number,
-          tracking_url: label.tracking_number
-            ? `https://track.shipstation.com/${label.tracking_number}`
-            : "",
-          label_url: label.label_download?.pdf || label.label_download?.href || "",
-        },
-      ],
+      labels,
     }
   }
 
