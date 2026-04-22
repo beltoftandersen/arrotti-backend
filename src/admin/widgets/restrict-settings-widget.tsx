@@ -13,7 +13,7 @@ import { useEffect } from "react"
 
 const RESTRICTED_EMAILS = ["orders@arrottigroup.com"]
 const STYLE_ID = "arrotti-restrict-sidebar-style"
-const HIDE_LABELS = ["Extensions", "Quotes", "QuickBooks"]
+const HIDE_LABELS: string[] = []
 const CACHE_KEY = "arrotti_admin_email"
 
 const STATIC_CSS = `
