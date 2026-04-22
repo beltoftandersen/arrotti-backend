@@ -86,27 +86,27 @@ export default async function fixLocalDeliveryCities({ container }: ExecArgs) {
   }> = []
 
   for (const [zip, city] of Object.entries(ZIP_CITY_MAP)) {
-    // Primary city name
-    geoZones.push({
-      type: "zip",
-      country_code: "us",
-      province_code: "FL",
-      city,
-      postal_expression: zip,
-    })
+    // Collect every spelling we need to accept: primary + any listed variations.
+    const names = new Set<string>([city, ...(CITY_VARIATIONS[city] ?? [])])
 
-    // Add variations if any
-    const variations = CITY_VARIATIONS[city]
-    if (variations) {
-      for (const variant of variations) {
-        geoZones.push({
-          type: "zip",
-          country_code: "us",
-          province_code: "FL",
-          city: variant,
-          postal_expression: zip,
-        })
-      }
+    // Medusa's geo-zone match is case-sensitive on city, so expand each name
+    // into its lower and upper forms as well. Prevents customers who type
+    // "orlando" or "ORLANDO" from silently losing Free Local Delivery.
+    const expanded = new Set<string>()
+    for (const n of names) {
+      expanded.add(n)
+      expanded.add(n.toLowerCase())
+      expanded.add(n.toUpperCase())
+    }
+
+    for (const name of expanded) {
+      geoZones.push({
+        type: "zip",
+        country_code: "us",
+        province_code: "FL",
+        city: name,
+        postal_expression: zip,
+      })
     }
   }
 
