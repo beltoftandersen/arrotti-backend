@@ -222,6 +222,7 @@ class ShipStationProviderService extends AbstractFulfillmentProviderService {
 
     const packagePayloads = packed.map((p) => {
       const payload: any = {
+        package_code: "package",
         weight: { value: p.weight, unit: weightUnit },
       }
       if (p.length > 0 && p.width > 0 && p.height > 0) {
@@ -303,49 +304,34 @@ class ShipStationProviderService extends AbstractFulfillmentProviderService {
     }
 
     // --- 2. Fetch rate from ShipStation ---
+    // Always create a fresh shipment when items may have changed. The
+    // shipment cache key is carrier+service+address only (no items), so
+    // reusing a cached shipment_id here would return rates for the old
+    // packages when the cart has mutated. validateFulfillmentData still
+    // consumes shipmentCache safely because the rate cached above is
+    // recomputed per item set.
     let rate: Rate | undefined
 
     if (!shipment_id) {
-      // Check shipment cache — reuse existing shipment_id to avoid
-      // creating a duplicate shipment on ShipStation
-      const shipCacheKey = buildShipmentCacheKey(
+      const shipment = await this.createShipment({
         carrier_id,
         carrier_service_code,
-        postalCode,
-        countryCode
-      )
-      const cachedShipment = shipmentCache.get(shipCacheKey)
+        from_address: {
+          name: context.from_location?.name,
+          address: context.from_location?.address,
+        },
+        to_address: context.shipping_address,
+        items: context.items || [],
+        currency_code: currencyCode,
+      })
+      rate = shipment.rate_response?.rates?.[0]
 
-      if (
-        cachedShipment &&
-        Date.now() - cachedShipment.timestamp < SHIPMENT_CACHE_TTL
-      ) {
-        const rateResponse = await this.client.getShipmentRates(
-          cachedShipment.shipment_id
+      if (shipment.shipment_id) {
+        pruneShipmentCache()
+        shipmentCache.set(
+          buildShipmentCacheKey(carrier_id, carrier_service_code, postalCode, countryCode),
+          { shipment_id: shipment.shipment_id, timestamp: Date.now() }
         )
-        rate = rateResponse?.[0]?.rates?.[0]
-      } else {
-        const shipment = await this.createShipment({
-          carrier_id,
-          carrier_service_code,
-          from_address: {
-            name: context.from_location?.name,
-            address: context.from_location?.address,
-          },
-          to_address: context.shipping_address,
-          items: context.items || [],
-          currency_code: currencyCode,
-        })
-        rate = shipment.rate_response?.rates?.[0]
-
-        // Cache shipment_id so validateFulfillmentData can reuse it
-        if (shipment.shipment_id) {
-          pruneShipmentCache()
-          shipmentCache.set(
-            buildShipmentCacheKey(carrier_id, carrier_service_code, postalCode, countryCode),
-            { shipment_id: shipment.shipment_id, timestamp: Date.now() }
-          )
-        }
       }
     } else {
       const rateResponse = await this.client.getShipmentRates(shipment_id)
