@@ -31,6 +31,7 @@ export type QboInvoice = {
   BillEmail?: { Address: string }
   BillAddr?: {
     Line1?: string
+    Line2?: string
     City?: string
     CountrySubDivisionCode?: string
     PostalCode?: string
@@ -38,6 +39,7 @@ export type QboInvoice = {
   }
   ShipAddr?: {
     Line1?: string
+    Line2?: string
     City?: string
     CountrySubDivisionCode?: string
     PostalCode?: string
@@ -73,6 +75,7 @@ export type InvoiceInput = {
   shippingDescription?: string
   taxAmount?: number
   billingAddress?: {
+    company?: string
     address_1?: string
     city?: string
     province?: string
@@ -80,6 +83,7 @@ export type InvoiceInput = {
     country_code?: string
   }
   shippingAddress?: {
+    company?: string
     address_1?: string
     city?: string
     province?: string
@@ -216,8 +220,10 @@ export async function createInvoice(
   }
 
   if (input.billingAddress) {
+    const { company, address_1 } = input.billingAddress
     invoiceData.BillAddr = {
-      Line1: input.billingAddress.address_1,
+      Line1: company || address_1,
+      Line2: company ? address_1 : undefined,
       City: input.billingAddress.city,
       CountrySubDivisionCode: input.billingAddress.province,
       PostalCode: input.billingAddress.postal_code,
@@ -226,8 +232,10 @@ export async function createInvoice(
   }
 
   if (input.shippingAddress) {
+    const { company, address_1 } = input.shippingAddress
     invoiceData.ShipAddr = {
-      Line1: input.shippingAddress.address_1,
+      Line1: company || address_1,
+      Line2: company ? address_1 : undefined,
       City: input.shippingAddress.city,
       CountrySubDivisionCode: input.shippingAddress.province,
       PostalCode: input.shippingAddress.postal_code,

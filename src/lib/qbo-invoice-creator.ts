@@ -28,6 +28,19 @@ const QBO_SHIPPING_INCOME_ACCOUNT_NAME = "Shipping Income"
 const QBO_SHIPPING_ITEM_NAME = "Shipping"
 const QBO_CUSTOMER_MEMO = "OUR PRODUCTS ARE NEW AFTERMARKET"
 
+function resolveCompany(
+  customerCompany?: string | null,
+  addressCompany?: string | null
+): string | undefined {
+  const c = (customerCompany || addressCompany || "").trim().toUpperCase()
+  return c.length > 0 ? c : undefined
+}
+
+const upper = (s?: string | null): string | undefined => {
+  const t = (s ?? "").trim()
+  return t.length > 0 ? t.toUpperCase() : undefined
+}
+
 type InvoiceMetadata = {
   connected: boolean
   exists: boolean
@@ -156,6 +169,7 @@ export async function createQboInvoiceForOrder(
       "shipping_methods.total",
       "customer.first_name",
       "customer.last_name",
+      "customer.company_name",
       "customer.phone",
       "customer.metadata",
       "sales_channel.name",
@@ -202,6 +216,7 @@ export async function createQboInvoiceForOrder(
     email: order.email,
     firstName: order.customer?.first_name || billingAddress?.first_name || undefined,
     lastName: order.customer?.last_name || billingAddress?.last_name || undefined,
+    company: resolveCompany(order.customer?.company_name, billingAddress?.company),
     phone: order.customer?.phone || billingAddress?.phone || undefined,
     billingAddress: billingAddress ? {
       address_1: billingAddress.address_1 || undefined,
@@ -392,18 +407,20 @@ export async function createQboInvoiceForOrder(
     taxAmount: toNumber(order.tax_total),
     note: QBO_CUSTOMER_MEMO,
     billingAddress: billingAddress ? {
-      address_1: billingAddress.address_1 || undefined,
-      city: billingAddress.city || undefined,
-      province: billingAddress.province || undefined,
+      company: resolveCompany(order.customer?.company_name, billingAddress.company),
+      address_1: upper(billingAddress.address_1),
+      city: upper(billingAddress.city),
+      province: upper(billingAddress.province),
       postal_code: billingAddress.postal_code || undefined,
-      country_code: billingAddress.country_code || undefined,
+      country_code: upper(billingAddress.country_code),
     } : undefined,
     shippingAddress: order.shipping_address ? {
-      address_1: order.shipping_address.address_1 || undefined,
-      city: order.shipping_address.city || undefined,
-      province: order.shipping_address.province || undefined,
+      company: resolveCompany(order.customer?.company_name, order.shipping_address.company),
+      address_1: upper(order.shipping_address.address_1),
+      city: upper(order.shipping_address.city),
+      province: upper(order.shipping_address.province),
       postal_code: order.shipping_address.postal_code || undefined,
-      country_code: order.shipping_address.country_code || undefined,
+      country_code: upper(order.shipping_address.country_code),
     } : undefined,
     salesTermRef,
     salesChannelName: (order as any).sales_channel?.name,

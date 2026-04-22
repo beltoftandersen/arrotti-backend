@@ -35,6 +35,7 @@ export type CustomerInput = {
   email: string
   firstName?: string
   lastName?: string
+  company?: string
   phone?: string
   billingAddress?: {
     address_1?: string
@@ -43,6 +44,19 @@ export type CustomerInput = {
     postal_code?: string
     country_code?: string
   }
+}
+
+/**
+ * Format a US phone to "(XXX) XXX-XXXX" to match the existing QBO DisplayName
+ * convention. Returns undefined when the input isn't a 10-digit US number
+ * (caller falls back to email-based uniqueness).
+ */
+function formatUsPhone(raw: string | undefined | null): string | undefined {
+  if (!raw) return undefined
+  const digits = raw.replace(/\D/g, "")
+  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits
+  if (ten.length !== 10) return undefined
+  return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}`
 }
 
 /**
@@ -66,16 +80,38 @@ export async function findCustomerByEmail(
 /**
  * Create a new customer in QuickBooks
  */
+const upper = (s: string | undefined | null): string | undefined => {
+  const t = (s ?? "").trim()
+  return t.length > 0 ? t.toUpperCase() : undefined
+}
+
 export async function createCustomer(
   client: QboClient,
   input: CustomerInput
 ): Promise<QboCustomer> {
   const fullName = [input.firstName, input.lastName].filter(Boolean).join(" ")
-  const displayName = fullName ? `${fullName} (${input.email})` : input.email
+  const companyUpper = upper(input.company)
+  const formattedPhone = formatUsPhone(input.phone)
+
+  // DisplayName convention mirrors existing QBO customers:
+  //   "<COMPANY> (XXX) XXX-XXXX"     for B2B
+  //   "First Last (XXX) XXX-XXXX"    for B2C with phone
+  // Falls back to the prior "<name> (<email>)" form when we have no phone,
+  // keeping uniqueness guaranteed.
+  const base = companyUpper || fullName || input.email
+  const displayName = formattedPhone
+    ? `${base} ${formattedPhone}`
+    : fullName
+      ? `${fullName} (${input.email})`
+      : input.email
 
   const customerData: Record<string, unknown> = {
     DisplayName: displayName,
     PrimaryEmailAddr: { Address: input.email },
+  }
+
+  if (companyUpper) {
+    customerData.CompanyName = companyUpper
   }
 
   if (input.firstName) {
@@ -87,16 +123,17 @@ export async function createCustomer(
   }
 
   if (input.phone) {
-    customerData.PrimaryPhone = { FreeFormNumber: input.phone }
+    customerData.PrimaryPhone = { FreeFormNumber: formattedPhone || input.phone }
   }
 
   if (input.billingAddress) {
     customerData.BillAddr = {
-      Line1: input.billingAddress.address_1,
-      City: input.billingAddress.city,
-      CountrySubDivisionCode: input.billingAddress.province,
+      Line1: companyUpper || upper(input.billingAddress.address_1),
+      Line2: companyUpper ? upper(input.billingAddress.address_1) : undefined,
+      City: upper(input.billingAddress.city),
+      CountrySubDivisionCode: upper(input.billingAddress.province),
       PostalCode: input.billingAddress.postal_code,
-      Country: input.billingAddress.country_code,
+      Country: upper(input.billingAddress.country_code),
     }
   }
 
