@@ -11,7 +11,7 @@ import {
 } from "./types"
 
 const DEFAULT_BASE_URL = "https://api.shipstation.com/v2"
-const REQUEST_TIMEOUT_MS = 30_000
+const REQUEST_TIMEOUT_MS = 8_000
 
 export class ShipStationClient {
   protected options: ShipStationOptions

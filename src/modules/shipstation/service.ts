@@ -242,7 +242,9 @@ class ShipStationProviderService extends AbstractFulfillmentProviderService {
         service_code: carrier_service_code,
         ship_to,
         ship_from,
-        validate_address: "validate_and_clean",
+        // validate_address intentionally omitted at rate time — it adds latency
+        // and is the most common cause of /rates hangs. Address validation is
+        // handled separately at label creation.
         items: items?.map((item) => ({
           name: item.title,
           quantity: item.quantity,
