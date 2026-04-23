@@ -27,7 +27,7 @@ import { FITMENT_MODULE } from "../modules/fitment"
 import FitmentModuleService from "../modules/fitment/service"
 import { SUPPLIER_MODULE } from "../modules/supplier"
 import SupplierModuleService from "../modules/supplier/service"
-import { calculateSellPrice } from "../services/auto-pricing"
+import { calculateSellPrice, pickPrimaryCandidate, type SupplierCandidate } from "../services/auto-pricing"
 import { deleteProductsWorkflow, deleteProductVariantsWorkflow } from "@medusajs/medusa/core-flows"
 import { execSync } from "child_process"
 import pg from "pg"
@@ -73,6 +73,12 @@ interface ImportRow {
   ksi_qty: string       // '0', '1', '5+' etc
   ksi_district_qty: string
   has_ksi: boolean
+  // LKQ / Keystone supplier data (null-defaulted columns in import_ready)
+  lkq_part_number: string | null
+  lkq_cost_price: string       // '0.00' when no LKQ
+  lkq_qty: string              // '0' or '2' — set by sync-lkq.py
+  lkq_eta: string | null       // ISO date or null
+  has_lkq: boolean
   is_quote_only: boolean
   partslink_id: number | null
   source: string
@@ -101,6 +107,11 @@ interface GroupedProduct {
     ksi_qty: string
     ksi_district_qty: string
     has_ksi: boolean
+    lkq_part_number: string | null
+    lkq_cost_price: string
+    lkq_qty: string
+    lkq_eta: string | null
+    has_lkq: boolean
     is_quote_only: boolean
     oem: string | null
   }>
@@ -129,6 +140,61 @@ function parseSingleQty(qty: string): number {
   const cleaned = qty.replace('+', '').trim()
   const num = parseInt(cleaned, 10)
   return isNaN(num) ? 0 : num
+}
+
+/**
+ * Build the KSI + KEYSTONE supplier candidate list for a source variant and
+ * return the computed sell price, winner, and is_primary flag for each
+ * supplier. "is_primary" is set to true only when a supplier is the *sole*
+ * option; when both are present, we set false on both and let
+ * findPricingSupplier re-pick at query time (stock → cheapest → highest-qty).
+ */
+function computeSupplierPricing(
+  v: {
+    cost_price: string
+    ksi_qty: string
+    ksi_district_qty: string
+    has_ksi: boolean
+    lkq_cost_price: string
+    lkq_qty: string
+    has_lkq: boolean
+    is_quote_only: boolean
+  },
+  ksiMarkup: number,
+  keystoneMarkup: number
+): {
+  sellPrice: number
+  ksiQty: number
+  lkqQty: number
+  ksiCost: number
+  lkqCost: number
+  isPrimaryKsi: boolean
+  isPrimaryKeystone: boolean
+} {
+  const ksiCost = parseFloat(v.cost_price) || 0
+  const lkqCost = parseFloat(v.lkq_cost_price) || 0
+  const ksiQty = parseQty(v.ksi_qty, v.ksi_district_qty)
+  const lkqQty = parseQty(v.lkq_qty)
+
+  const candidates: SupplierCandidate[] = []
+  if (v.has_ksi) candidates.push({ code: "KSI", costPrice: ksiCost, stockQty: ksiQty, markup: ksiMarkup })
+  if (v.has_lkq) candidates.push({ code: "KEYSTONE", costPrice: lkqCost, stockQty: lkqQty, markup: keystoneMarkup })
+
+  const winner = pickPrimaryCandidate(candidates)
+  const sellPrice = v.is_quote_only || !winner
+    ? 0
+    : calculateSellPrice(winner.costPrice, winner.markup)
+
+  const soleSupplier = candidates.length === 1
+  return {
+    sellPrice,
+    ksiQty,
+    lkqQty,
+    ksiCost,
+    lkqCost,
+    isPrimaryKsi: v.has_ksi && soleSupplier,
+    isPrimaryKeystone: v.has_lkq && soleSupplier,
+  }
 }
 
 /**
@@ -314,7 +380,19 @@ export default async function importFromMerged({ container }: ExecArgs) {
     logger.info(`  KSI supplier: ${ksiSupplier.id}`)
   }
 
+  let keystoneSupplier = (await supplierService.listSuppliers({ code: "KEYSTONE" }))[0]
+  if (!keystoneSupplier) {
+    keystoneSupplier = await supplierService.createSuppliers({
+      name: "Keystone",
+      code: "KEYSTONE",
+    })
+    logger.info(`  Created KEYSTONE supplier: ${keystoneSupplier.id}`)
+  } else {
+    logger.info(`  KEYSTONE supplier: ${keystoneSupplier.id}`)
+  }
+
   const markup = (ksiSupplier as any).default_markup || 20
+  const keystoneMarkup = (keystoneSupplier as any).default_markup || 20
 
   const salesChannelService = container.resolve(Modules.SALES_CHANNEL)
   const salesChannels = await salesChannelService.listSalesChannels({ is_disabled: false })
@@ -439,6 +517,11 @@ export default async function importFromMerged({ container }: ExecArgs) {
         ksi_qty: row.ksi_qty,
         ksi_district_qty: row.ksi_district_qty,
         has_ksi: row.has_ksi,
+        lkq_part_number: row.lkq_part_number,
+        lkq_cost_price: row.lkq_cost_price,
+        lkq_qty: row.lkq_qty,
+        lkq_eta: row.lkq_eta,
+        has_lkq: row.has_lkq,
         is_quote_only: row.is_quote_only,
         oem: row.oem,
       })
@@ -676,8 +759,9 @@ export default async function importFromMerged({ container }: ExecArgs) {
               const sourceVariant = group.variants.find((v) => v.plink === variant.sku)
               if (!sourceVariant) continue
 
-              const costPrice = parseFloat(sourceVariant.cost_price) || 0
-              const sellPrice = sourceVariant.is_quote_only ? 0 : (costPrice > 0 ? calculateSellPrice(costPrice, markup) : 0)
+              const pricing = computeSupplierPricing(sourceVariant, markup, keystoneMarkup)
+              const costPrice = pricing.ksiCost
+              const sellPrice = pricing.sellPrice
 
               // Create price set and link to variant
               try {
@@ -711,7 +795,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
                   [Modules.INVENTORY]: { inventory_item_id: invItem.id },
                 })
 
-                const qty = parseQty(sourceVariant.ksi_qty, sourceVariant.ksi_district_qty)
+                const qty = pricing.ksiQty
                 await inventoryService.createInventoryLevels([{
                   inventory_item_id: invItem.id,
                   location_id: stockLocationId,
@@ -724,7 +808,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
                 errors++
               }
 
-              // Create supplier link
+              // Create KSI supplier link
               if (sourceVariant.has_ksi) {
                 try {
                   await link.create({
@@ -734,15 +818,39 @@ export default async function importFromMerged({ container }: ExecArgs) {
                       partslink_no: group.base_plink,
                       supplier_sku: sourceVariant.ksi_no,
                       oem_number: sourceVariant.oem,
-                      cost_price: costPrice,
-                      stock_qty: parseQty(sourceVariant.ksi_qty, sourceVariant.ksi_district_qty),
-                      is_primary: true,
+                      cost_price: pricing.ksiCost,
+                      stock_qty: pricing.ksiQty,
+                      is_primary: pricing.isPrimaryKsi,
                     },
                   })
                   supplierLinks++
                 } catch (err: any) {
                   if (!err.message?.includes("already exists") && !err.message?.includes("duplicate")) {
-                    if (errors < 5) logger.warn(`  Supplier link error ${variant.id}: ${err.message}`)
+                    if (errors < 5) logger.warn(`  KSI supplier link error ${variant.id}: ${err.message}`)
+                    errors++
+                  }
+                }
+              }
+
+              // Create KEYSTONE supplier link when LKQ has a match
+              if (sourceVariant.has_lkq) {
+                try {
+                  await link.create({
+                    [Modules.PRODUCT]: { product_variant_id: variant.id },
+                    supplier: { supplier_id: keystoneSupplier.id },
+                    data: {
+                      partslink_no: group.base_plink,
+                      supplier_sku: sourceVariant.lkq_part_number,
+                      oem_number: sourceVariant.oem,
+                      cost_price: pricing.lkqCost,
+                      stock_qty: pricing.lkqQty,
+                      is_primary: pricing.isPrimaryKeystone,
+                    },
+                  })
+                  supplierLinks++
+                } catch (err: any) {
+                  if (!err.message?.includes("already exists") && !err.message?.includes("duplicate")) {
+                    if (errors < 5) logger.warn(`  KEYSTONE supplier link error ${variant.id}: ${err.message}`)
                     errors++
                   }
                 }
@@ -922,9 +1030,10 @@ export default async function importFromMerged({ container }: ExecArgs) {
 
               createdVariants++
 
-              // Create price for new variant
-              const costPrice = parseFloat(sourceVariant.cost_price) || 0
-              const sellPrice = sourceVariant.is_quote_only ? 0 : (costPrice > 0 ? calculateSellPrice(costPrice, markup) : 0)
+              // Create price for new variant (winner between KSI and KEYSTONE)
+              const pricing = computeSupplierPricing(sourceVariant, markup, keystoneMarkup)
+              const costPrice = pricing.ksiCost
+              const sellPrice = pricing.sellPrice
               if (sourceVariant.is_quote_only) quoteOnlyVariants++
 
               const priceSet = await pricingModuleService.createPriceSets({
@@ -954,7 +1063,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
                 })
               } catch { /* link may exist */ }
 
-              const qty = parseQty(sourceVariant.ksi_qty, sourceVariant.ksi_district_qty)
+              const qty = pricing.ksiQty
               const lvls = await inventoryService.listInventoryLevels({
                 inventory_item_id: invItem.id,
                 location_id: stockLocationId,
@@ -975,7 +1084,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
               }
               createdInventoryItems++
 
-              // Create supplier link for new variant
+              // Create KSI supplier link for new variant
               if (sourceVariant.has_ksi && sourceVariant.ksi_no) {
                 try {
                   await link.create({
@@ -985,9 +1094,28 @@ export default async function importFromMerged({ container }: ExecArgs) {
                       partslink_no: group.base_plink,
                       supplier_sku: sourceVariant.ksi_no,
                       oem_number: sourceVariant.oem,
-                      cost_price: costPrice > 0 ? costPrice : null,
-                      stock_qty: qty,
-                      is_primary: true,
+                      cost_price: pricing.ksiCost > 0 ? pricing.ksiCost : null,
+                      stock_qty: pricing.ksiQty,
+                      is_primary: pricing.isPrimaryKsi,
+                    },
+                  })
+                  supplierLinks++
+                } catch { /* may exist */ }
+              }
+
+              // Create KEYSTONE supplier link for new variant
+              if (sourceVariant.has_lkq) {
+                try {
+                  await link.create({
+                    [Modules.PRODUCT]: { product_variant_id: newVariant.id },
+                    supplier: { supplier_id: keystoneSupplier.id },
+                    data: {
+                      partslink_no: group.base_plink,
+                      supplier_sku: sourceVariant.lkq_part_number,
+                      oem_number: sourceVariant.oem,
+                      cost_price: pricing.lkqCost > 0 ? pricing.lkqCost : null,
+                      stock_qty: pricing.lkqQty,
+                      is_primary: pricing.isPrimaryKeystone,
                     },
                   })
                   supplierLinks++
@@ -1028,8 +1156,9 @@ export default async function importFromMerged({ container }: ExecArgs) {
             errors++
           }
 
-          const costPrice = parseFloat(sourceVariant.cost_price) || 0
-          const sellPrice = sourceVariant.is_quote_only ? 0 : (costPrice > 0 ? calculateSellPrice(costPrice, markup) : 0)
+          const pricing = computeSupplierPricing(sourceVariant, markup, keystoneMarkup)
+          const costPrice = pricing.ksiCost
+          const sellPrice = pricing.sellPrice
           if (sourceVariant.is_quote_only) quoteOnlyVariants++
 
           // Update price
@@ -1085,7 +1214,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
 
             const variantRecord = (variantData[0] as any)
             const inventoryItems = variantRecord?.inventory_items || []
-            const qty = parseQty(sourceVariant.ksi_qty, sourceVariant.ksi_district_qty)
+            const qty = pricing.ksiQty
 
             if (inventoryItems.length > 0 && inventoryItems[0]?.inventory_item_id) {
               const inventoryItemId = inventoryItems[0].inventory_item_id
@@ -1159,18 +1288,17 @@ export default async function importFromMerged({ container }: ExecArgs) {
             errors++
           }
 
-          // Update supplier link (direct SQL for existing, link.create for new)
+          // Update KSI supplier link (direct SQL for existing, link.create for new).
+          // Also updates the is_primary flag so it flips correctly when LKQ joins/leaves.
           if (sourceVariant.has_ksi) {
-            const qty = parseQty(sourceVariant.ksi_qty, sourceVariant.ksi_district_qty)
             try {
               const updateResult = await medusaPool.query(
-                `UPDATE variant_supplier SET cost_price = $1, stock_qty = $2, supplier_sku = $3, updated_at = NOW()
-                 WHERE product_variant_id = $4 AND supplier_id = $5`,
-                [costPrice, qty, sourceVariant.ksi_no, matchedVariant.id, ksiSupplier.id]
+                `UPDATE variant_supplier SET cost_price = $1, stock_qty = $2, supplier_sku = $3, is_primary = $4, updated_at = NOW()
+                 WHERE product_variant_id = $5 AND supplier_id = $6`,
+                [pricing.ksiCost, pricing.ksiQty, sourceVariant.ksi_no, pricing.isPrimaryKsi, matchedVariant.id, ksiSupplier.id]
               )
 
               if (updateResult.rowCount === 0) {
-                // Link doesn't exist yet, create it
                 await link.create({
                   [Modules.PRODUCT]: { product_variant_id: matchedVariant.id },
                   supplier: { supplier_id: ksiSupplier.id },
@@ -1178,18 +1306,62 @@ export default async function importFromMerged({ container }: ExecArgs) {
                     partslink_no: group.base_plink,
                     supplier_sku: sourceVariant.ksi_no,
                     oem_number: sourceVariant.oem,
-                    cost_price: costPrice,
-                    stock_qty: qty,
-                    is_primary: true,
+                    cost_price: pricing.ksiCost,
+                    stock_qty: pricing.ksiQty,
+                    is_primary: pricing.isPrimaryKsi,
                   },
                 })
               }
               supplierLinks++
             } catch (err: any) {
               if (!err.message?.includes("already exists") && !err.message?.includes("duplicate")) {
-                if (errors < 5) logger.warn(`  Supplier link update error ${matchedVariant.id}: ${err.message}`)
+                if (errors < 5) logger.warn(`  KSI supplier link update error ${matchedVariant.id}: ${err.message}`)
                 errors++
               }
+            }
+          }
+
+          // Update KEYSTONE supplier link when LKQ has a match; otherwise remove
+          // any stale row (LKQ dropped this part between weekly scrapes).
+          if (sourceVariant.has_lkq) {
+            try {
+              const updateResult = await medusaPool.query(
+                `UPDATE variant_supplier SET cost_price = $1, stock_qty = $2, supplier_sku = $3, is_primary = $4, updated_at = NOW()
+                 WHERE product_variant_id = $5 AND supplier_id = $6`,
+                [pricing.lkqCost, pricing.lkqQty, sourceVariant.lkq_part_number, pricing.isPrimaryKeystone, matchedVariant.id, keystoneSupplier.id]
+              )
+
+              if (updateResult.rowCount === 0) {
+                await link.create({
+                  [Modules.PRODUCT]: { product_variant_id: matchedVariant.id },
+                  supplier: { supplier_id: keystoneSupplier.id },
+                  data: {
+                    partslink_no: group.base_plink,
+                    supplier_sku: sourceVariant.lkq_part_number,
+                    oem_number: sourceVariant.oem,
+                    cost_price: pricing.lkqCost,
+                    stock_qty: pricing.lkqQty,
+                    is_primary: pricing.isPrimaryKeystone,
+                  },
+                })
+              }
+              supplierLinks++
+            } catch (err: any) {
+              if (!err.message?.includes("already exists") && !err.message?.includes("duplicate")) {
+                if (errors < 5) logger.warn(`  KEYSTONE supplier link update error ${matchedVariant.id}: ${err.message}`)
+                errors++
+              }
+            }
+          } else {
+            // No LKQ match this week — remove any existing KEYSTONE row.
+            try {
+              await medusaPool.query(
+                `DELETE FROM variant_supplier WHERE product_variant_id = $1 AND supplier_id = $2`,
+                [matchedVariant.id, keystoneSupplier.id]
+              )
+            } catch (err: any) {
+              if (errors < 5) logger.warn(`  KEYSTONE supplier link cleanup error ${matchedVariant.id}: ${err.message}`)
+              errors++
             }
           }
         }

@@ -31,6 +31,39 @@ export function calculateSellPrice(costPrice: number, markupPercent: number): nu
 }
 
 /**
+ * Raw supplier candidate for import-time pricing. Used when we don't have
+ * VariantSupplierLink rows yet (we're about to create them) but know the
+ * underlying cost/stock per supplier.
+ */
+export type SupplierCandidate = {
+  code: string
+  costPrice: number
+  stockQty: number
+  markup: number
+}
+
+/**
+ * Pick the best supplier at import time, mirroring findPricingSupplier's
+ * stock-then-cost-then-qty sort. Returns null if no candidate has a cost.
+ * Used by import-from-merged to drive sell price + is_primary decisions
+ * before the variant_supplier rows exist in the DB.
+ */
+export function pickPrimaryCandidate(
+  candidates: SupplierCandidate[]
+): SupplierCandidate | null {
+  const withCost = candidates.filter((c) => c.costPrice > 0)
+  if (withCost.length === 0) return null
+
+  return [...withCost].sort((a, b) => {
+    const aHas = a.stockQty > 0 ? 1 : 0
+    const bHas = b.stockQty > 0 ? 1 : 0
+    if (aHas !== bHas) return bHas - aHas
+    if (a.costPrice !== b.costPrice) return a.costPrice - b.costPrice
+    return b.stockQty - a.stockQty
+  })[0]
+}
+
+/**
  * Get the effective markup for a variant-supplier link
  * Uses markup_override if set, otherwise falls back to supplier's default_markup
  */
