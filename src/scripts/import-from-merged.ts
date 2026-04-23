@@ -166,6 +166,7 @@ function computeSupplierPricing(
   sellPrice: number
   ksiQty: number
   lkqQty: number
+  inventoryQty: number
   ksiCost: number
   lkqCost: number
   isPrimaryKsi: boolean
@@ -186,10 +187,15 @@ function computeSupplierPricing(
     : calculateSellPrice(winner.costPrice, winner.markup)
 
   const soleSupplier = candidates.length === 1
+  // Medusa inventory is a single number per variant. KSI and KEYSTONE are
+  // alternate fulfillment sources (we ship from one, not both), so the cap
+  // on sellable units is max(), not sum().
+  const inventoryQty = Math.max(ksiQty, lkqQty)
   return {
     sellPrice,
     ksiQty,
     lkqQty,
+    inventoryQty,
     ksiCost,
     lkqCost,
     isPrimaryKsi: v.has_ksi && soleSupplier,
@@ -795,7 +801,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
                   [Modules.INVENTORY]: { inventory_item_id: invItem.id },
                 })
 
-                const qty = pricing.ksiQty
+                const qty = pricing.inventoryQty
                 await inventoryService.createInventoryLevels([{
                   inventory_item_id: invItem.id,
                   location_id: stockLocationId,
@@ -1063,7 +1069,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
                 })
               } catch { /* link may exist */ }
 
-              const qty = pricing.ksiQty
+              const qty = pricing.inventoryQty
               const lvls = await inventoryService.listInventoryLevels({
                 inventory_item_id: invItem.id,
                 location_id: stockLocationId,
@@ -1214,7 +1220,7 @@ export default async function importFromMerged({ container }: ExecArgs) {
 
             const variantRecord = (variantData[0] as any)
             const inventoryItems = variantRecord?.inventory_items || []
-            const qty = pricing.ksiQty
+            const qty = pricing.inventoryQty
 
             if (inventoryItems.length > 0 && inventoryItems[0]?.inventory_item_id) {
               const inventoryItemId = inventoryItems[0].inventory_item_id
