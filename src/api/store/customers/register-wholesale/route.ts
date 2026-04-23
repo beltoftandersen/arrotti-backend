@@ -28,6 +28,12 @@ type RegisterWholesaleBody = {
   company_name?: string
   phone?: string
   tax_id?: string
+  address_1?: string
+  address_2?: string
+  city?: string
+  province?: string
+  postal_code?: string
+  country_code?: string
 }
 
 /**
@@ -60,6 +66,30 @@ export async function POST(
       res.status(400).json({
         message: "First name and last name are required",
       })
+      return
+    }
+
+    if (!body.company_name?.trim()) {
+      res.status(400).json({ message: "Company name is required" })
+      return
+    }
+
+    if (!body.tax_id?.trim()) {
+      res.status(400).json({ message: "Tax ID is required" })
+      return
+    }
+
+    const missingAddressField = !body.address_1?.trim()
+      ? "street address"
+      : !body.city?.trim()
+        ? "city"
+        : !body.province?.trim()
+          ? "state"
+          : !body.postal_code?.trim()
+            ? "ZIP code"
+            : null
+    if (missingAddressField) {
+      res.status(400).json({ message: `Billing ${missingAddressField} is required` })
       return
     }
 
@@ -311,6 +341,33 @@ export async function POST(
 
       logger.info(
         `[Wholesale Registration] Created wholesale customer ${customerResult.id} (${emailLc})`
+      )
+    }
+
+    // Persist the billing address on the customer account so checkout,
+    // QBO sync, and tax lookup can use it. Also marked as default shipping
+    // per product decision (B2B customers typically ship to the same place).
+    try {
+      await customerModule.createCustomerAddresses([{
+        customer_id: customerResult.id,
+        first_name: body.first_name,
+        last_name: body.last_name,
+        company: body.company_name || undefined,
+        address_1: body.address_1!.trim(),
+        address_2: body.address_2?.trim() || undefined,
+        city: body.city!.trim(),
+        province: body.province!.trim(),
+        postal_code: body.postal_code!.trim(),
+        country_code: (body.country_code || "us").trim().toLowerCase(),
+        phone: body.phone || undefined,
+        is_default_billing: true,
+        is_default_shipping: true,
+      }])
+    } catch (addrErr: any) {
+      // Don't fail registration if the address write fails — log and move on;
+      // the customer can add one at first checkout.
+      logger.warn(
+        `[Wholesale Registration] Failed to write billing address for ${emailLc}: ${addrErr.message}`
       )
     }
 
