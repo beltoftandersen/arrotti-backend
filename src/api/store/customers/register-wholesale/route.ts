@@ -2,6 +2,7 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
 import { createCustomerAccountWorkflow } from "@medusajs/medusa/core-flows"
 import { uploadFilesWorkflow } from "@medusajs/medusa/core-flows"
+import { formatUsPhone } from "../../../../lib/format-phone"
 
 // Type for multer file
 type MulterFile = {
@@ -76,6 +77,14 @@ export async function POST(
 
     if (!body.tax_id?.trim()) {
       res.status(400).json({ message: "Tax ID is required" })
+      return
+    }
+
+    const normalizedPhone = formatUsPhone(body.phone)
+    if (!normalizedPhone) {
+      res.status(400).json({
+        message: "A valid US phone number is required (10 digits).",
+      })
       return
     }
 
@@ -259,7 +268,7 @@ export async function POST(
           last_name: body.last_name,
           email: emailLc,
           company_name: body.company_name || null,
-          phone: body.phone || null,
+          phone: normalizedPhone,
           metadata: mergedMetadata,
         }
       )
@@ -302,7 +311,7 @@ export async function POST(
         last_name: body.last_name,
         email: emailLc,
         company_name: body.company_name || null,
-        phone: body.phone || null,
+        phone: normalizedPhone,
         has_account: true,
         metadata: registrationMetadata,
       }
@@ -359,7 +368,7 @@ export async function POST(
         province: body.province!.trim(),
         postal_code: body.postal_code!.trim(),
         country_code: (body.country_code || "us").trim().toLowerCase(),
-        phone: body.phone || undefined,
+        phone: normalizedPhone,
         is_default_billing: true,
         is_default_shipping: true,
       }])

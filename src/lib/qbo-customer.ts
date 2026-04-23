@@ -3,6 +3,7 @@
  */
 
 import { QboClient } from "./qbo-client"
+import { formatUsPhone } from "./format-phone"
 
 export type QboCustomer = {
   Id: string
@@ -44,19 +45,6 @@ export type CustomerInput = {
     postal_code?: string
     country_code?: string
   }
-}
-
-/**
- * Format a US phone to "(XXX) XXX-XXXX" to match the existing QBO DisplayName
- * convention. Returns undefined when the input isn't a 10-digit US number
- * (caller falls back to email-based uniqueness).
- */
-function formatUsPhone(raw: string | undefined | null): string | undefined {
-  if (!raw) return undefined
-  const digits = raw.replace(/\D/g, "")
-  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits
-  if (ten.length !== 10) return undefined
-  return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)}-${ten.slice(6)}`
 }
 
 /**
