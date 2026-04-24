@@ -533,6 +533,37 @@ export async function GET(req: MedusaStoreRequest, res: MedusaResponse) {
     }
   )
 
+  // Re-sort merged hits across indexes. Each Meilisearch index returns
+  // its own sorted slice, but the reduce above simply concatenates
+  // them — without this pass, items from a later index always appear
+  // after all items from an earlier index regardless of the sort key.
+  if (sortParam === "price_asc" || sortParam === "price_desc") {
+    const dir = sortParam === "price_asc" ? 1 : -1
+    mergedResults.hits.sort((a: any, b: any) => {
+      const pa = typeof a.price_cents === "number" ? a.price_cents : null
+      const pb = typeof b.price_cents === "number" ? b.price_cents : null
+      // Quote-only / unpriced items sort to the end in both directions.
+      if (pa === null && pb === null) return 0
+      if (pa === null) return 1
+      if (pb === null) return -1
+      return (pa - pb) * dir
+    })
+  } else if (sortParam === "title" || sortParam === "-title") {
+    const dir = sortParam === "title" ? 1 : -1
+    mergedResults.hits.sort((a: any, b: any) => {
+      const ta = String(a.title ?? "")
+      const tb = String(b.title ?? "")
+      return ta.localeCompare(tb) * dir
+    })
+  } else if (sortParam === "created_at" || sortParam === "-created_at") {
+    const dir = sortParam === "-created_at" ? 1 : -1 // "created_at" maps to DESC (newest first)
+    mergedResults.hits.sort((a: any, b: any) => {
+      const ca = typeof a.created_at === "number" ? a.created_at : 0
+      const cb = typeof b.created_at === "number" ? b.created_at : 0
+      return (ca - cb) * dir
+    })
+  }
+
   // Submodel/conditions filtering is now done in Meilisearch (no more post-filtering)
   const productIds = mergedResults.hits.map((hit: any) => hit.id)
 
