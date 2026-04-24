@@ -34,7 +34,7 @@ export async function POST(
   // Verify quote exists and is in "pending" status
   const { data: quotes } = await query.graph({
     entity: "quote",
-    fields: ["id", "status"],
+    fields: ["id", "status", "created_at"],
     filters: { id },
   })
 
@@ -50,12 +50,21 @@ export async function POST(
     return
   }
 
+  // Default expires_at to 3 days after the quote was requested
+  const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000
+  const requestedAt = quotes[0].created_at
+    ? new Date(quotes[0].created_at as any)
+    : new Date()
+  const expiresAt = body.expires_at
+    ? body.expires_at
+    : new Date(requestedAt.getTime() + THREE_DAYS_MS).toISOString()
+
   const { result } = await sendQuoteWorkflow(req.scope).run({
     input: {
       id,
       quoted_price: body.quoted_price,
       currency_code: body.currency_code,
-      expires_at: body.expires_at,
+      expires_at: expiresAt,
       admin_notes: body.admin_notes,
     },
   })

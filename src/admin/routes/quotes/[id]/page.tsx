@@ -87,6 +87,19 @@ const QuoteDetailPage = () => {
         if (data.quote.admin_notes) {
           setAdminNotes(data.quote.admin_notes)
         }
+
+        // Default expires_at to 3 days after the quote was requested
+        if (!data.quote.expires_at && data.quote.created_at) {
+          const requestedAt = new Date(data.quote.created_at)
+          const defaultExpiry = new Date(
+            requestedAt.getTime() + 3 * 24 * 60 * 60 * 1000
+          )
+          setExpiresAt(defaultExpiry.toISOString().slice(0, 10))
+        } else if (data.quote.expires_at) {
+          setExpiresAt(
+            new Date(data.quote.expires_at).toISOString().slice(0, 10)
+          )
+        }
       } catch (err: any) {
         setError(err.message)
       } finally {
@@ -104,15 +117,18 @@ const QuoteDetailPage = () => {
       return
     }
 
+    if (!expiresAt) {
+      setError("Please set an expiration date")
+      return
+    }
+
     setSending(true)
     setError(null)
 
     try {
       const body: Record<string, any> = {
         quoted_price: priceInCents,
-      }
-      if (expiresAt) {
-        body.expires_at = new Date(expiresAt).toISOString()
+        expires_at: new Date(expiresAt).toISOString(),
       }
       if (adminNotes.trim()) {
         body.admin_notes = adminNotes.trim()
@@ -280,15 +296,16 @@ const QuoteDetailPage = () => {
               </div>
               <div>
                 <Text size="small" weight="plus" className="mb-2">
-                  Expires At (optional)
+                  Expires At
                 </Text>
                 <Input
                   type="date"
+                  required
                   value={expiresAt}
                   onChange={(e) => setExpiresAt(e.target.value)}
                 />
                 <Text size="xsmall" className="text-ui-fg-subtle mt-1">
-                  Quote will auto-expire after this date
+                  Defaults to 3 days after the quote was requested
                 </Text>
               </div>
             </div>

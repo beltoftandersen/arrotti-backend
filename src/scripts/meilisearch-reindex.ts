@@ -47,11 +47,11 @@ const SORTABLE_ATTRIBUTES = [
 //   ones (1000-1031-front-bumper-cover-retainer), clustering same-category
 //   products together
 const RANKING_RULES = [
+  "sort",
   "words",
   "typo",
   "proximity",
   "attribute",
-  "sort",
   "exactness",
   "vehicle_token_count:asc",
   "primary_category_handle:asc",
@@ -336,7 +336,7 @@ export default async function meilisearchReindex({
     // price.amount is in dollars (e.g., 54.5 = $54.50), convert to cents for integer filtering
     const db = container.resolve("__pg_connection__")
     const priceRows = await db.raw(
-      `SELECT pv.product_id, MIN(p.amount) as min_price
+      `SELECT pv.product_id, MIN(p.amount) FILTER (WHERE p.amount > 0) as min_price
        FROM product_variant pv
        JOIN product_variant_price_set pvps ON pvps.variant_id = pv.id AND pvps.deleted_at IS NULL
        JOIN price p ON p.price_set_id = pvps.price_set_id AND p.deleted_at IS NULL

@@ -33,4 +33,5 @@ meilisearch
 data.ms/
 
 # Misc
+cookies.txt.env.backup-*
 cookies.txt

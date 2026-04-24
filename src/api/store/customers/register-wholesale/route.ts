@@ -195,7 +195,18 @@ export async function POST(
     )
 
     const registeredRow = existingRows.find((r: any) => r.has_account === true)
-    if (registeredRow) {
+
+    // Reapply branch: an existing registered customer that was previously
+    // rejected may submit a new application. Anything else (approved, or
+    // pending with no rejection) still 409s.
+    const registeredMetadata =
+      (registeredRow?.metadata as Record<string, any> | null) || null
+    const isReapply =
+      !!registeredRow &&
+      !!registeredMetadata?.rejected_at &&
+      !registeredMetadata?.approved_at
+
+    if (registeredRow && !isReapply) {
       res.status(409).json({
         message: "An account with this email already exists. Please sign in instead.",
       })
@@ -204,8 +215,133 @@ export async function POST(
 
     const guestRow = existingRows.find((r: any) => r.has_account === false)
 
-    // 3. Register auth identity (email/password)
     const authModule = req.scope.resolve(Modules.AUTH)
+
+    let customerResult: {
+      id: string
+      email: string
+      first_name: string | null
+      last_name: string | null
+      company_name: string | null
+    }
+
+    if (isReapply && registeredRow) {
+      // Replace auth identity so the newly submitted password takes effect.
+      let existingIdentities: any[] = []
+      try {
+        existingIdentities = await authModule.listAuthIdentities({
+          app_metadata: { customer_id: registeredRow.id },
+        } as any)
+      } catch {
+        existingIdentities = []
+      }
+
+      if (!existingIdentities.length) {
+        try {
+          existingIdentities = await authModule.listAuthIdentities({
+            provider_identities: { entity_id: emailLc, provider: "emailpass" },
+          } as any)
+        } catch {
+          existingIdentities = []
+        }
+      }
+
+      for (const identity of existingIdentities) {
+        try {
+          await authModule.deleteAuthIdentities([identity.id])
+        } catch (e: any) {
+          logger.warn(
+            `[Wholesale Reapply] Failed to delete auth identity ${identity.id}: ${e.message}`
+          )
+        }
+      }
+
+      let reapplyAuthResult
+      try {
+        reapplyAuthResult = await authModule.register("emailpass", {
+          body: { email: emailLc, password: body.password },
+        } as any)
+      } catch (authError: any) {
+        logger.error(
+          `[Wholesale Reapply] Failed to register new auth identity for ${emailLc}: ${authError.message}`
+        )
+        res.status(500).json({
+          message: "Reapplication failed. Please try again later.",
+        })
+        return
+      }
+
+      if (!reapplyAuthResult?.success || !reapplyAuthResult.authIdentity) {
+        res.status(400).json({
+          message: reapplyAuthResult?.error || "Failed to reset authentication",
+        })
+        return
+      }
+
+      const newAuthIdentityId = reapplyAuthResult.authIdentity.id
+
+      const priorMetadata = registeredMetadata || {}
+      const {
+        rejected_at: _ra,
+        rejected_by: _rb,
+        rejection_reason: _rr,
+        ...carriedMetadata
+      } = priorMetadata as Record<string, any>
+
+      const reapplyMetadata: Record<string, any> = {
+        ...carriedMetadata,
+        tax_id: body.tax_id || carriedMetadata.tax_id || null,
+        tax_documents:
+          taxDocuments.length > 0
+            ? taxDocuments
+            : carriedMetadata.tax_documents || [],
+        registration_date: new Date().toISOString(),
+        pending_approval: true,
+        registration_source: "wholesale_portal",
+        reapplied_at: new Date().toISOString(),
+        reapply_count: (carriedMetadata.reapply_count || 0) + 1,
+      }
+
+      const [updated] = await customerModule.updateCustomers(
+        [registeredRow.id],
+        {
+          first_name: body.first_name,
+          last_name: body.last_name,
+          email: emailLc,
+          company_name: body.company_name || null,
+          phone: normalizedPhone,
+          metadata: reapplyMetadata,
+        }
+      )
+
+      const existingAuth = await authModule.retrieveAuthIdentity(newAuthIdentityId)
+      await authModule.updateAuthIdentities({
+        id: newAuthIdentityId,
+        app_metadata: {
+          ...(existingAuth.app_metadata || {}),
+          customer_id: registeredRow.id,
+        },
+      })
+
+      customerResult = {
+        id: updated.id,
+        email: emailLc,
+        first_name: updated.first_name ?? null,
+        last_name: updated.last_name ?? null,
+        company_name: updated.company_name ?? null,
+      }
+
+      const eventBus = req.scope.resolve(Modules.EVENT_BUS)
+      await eventBus.emit({
+        name: "customer.wholesale_reapplied",
+        data: { id: registeredRow.id },
+      })
+
+      logger.info(
+        `[Wholesale Reapply] Customer ${registeredRow.id} (${emailLc}) resubmitted wholesale application (attempt ${reapplyMetadata.reapply_count})`
+      )
+    } else {
+    // 3. Register auth identity (email/password)
 
     let authResult
     try {
@@ -243,14 +379,6 @@ export async function POST(
       registration_date: new Date().toISOString(),
       pending_approval: true,
       registration_source: "wholesale_portal",
-    }
-
-    let customerResult: {
-      id: string
-      email: string
-      first_name: string | null
-      last_name: string | null
-      company_name: string | null
     }
 
     if (guestRow) {
@@ -351,6 +479,7 @@ export async function POST(
       logger.info(
         `[Wholesale Registration] Created wholesale customer ${customerResult.id} (${emailLc})`
       )
+    }
     }
 
     // Persist the billing address on the customer account so checkout,

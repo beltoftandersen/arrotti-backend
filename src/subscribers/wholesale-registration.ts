@@ -80,6 +80,7 @@ export default async function wholesaleRegistrationHandler({
     const companyName = customer.company_name || "Not provided"
     const taxId = metadata.tax_id || "Not provided"
     const taxDocuments = metadata.tax_documents || []
+    const isReapply = Boolean((metadata as any)?.reapplied_at)
 
     // ============================================
     // 1. Send confirmation email to customer
@@ -161,7 +162,7 @@ If you have any questions, feel free to reach out to us at orders@arrottigroup.c
       channel: "email",
       template: "wholesale-registration-customer",
       data: {
-        subject: "Wholesale Account Application Received",
+        subject: isReapply ? "Wholesale Account Reapplication Received" : "Wholesale Account Application Received",
         html: customerHtml,
         text: customerText,
       },
@@ -297,7 +298,7 @@ or use the API endpoint: POST /admin/customers/${customer.id}/approve-wholesale
       channel: "email",
       template: "wholesale-registration-admin",
       data: {
-        subject: `New Wholesale Application: ${customerName}`,
+        subject: `${isReapply ? "Wholesale Reapplication" : "New Wholesale Application"}: ${customerName}`,
         html: adminHtml,
         text: adminText,
         attachments: attachments.length > 0 ? attachments : undefined,
@@ -321,5 +322,5 @@ function formatFileSize(bytes: number): string {
 }
 
 export const config: SubscriberConfig = {
-  event: "customer.created",
+  event: ["customer.created", "customer.wholesale_reapplied"],
 }
