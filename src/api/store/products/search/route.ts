@@ -540,9 +540,15 @@ export async function GET(req: MedusaStoreRequest, res: MedusaResponse) {
   if (sortParam === "price_asc" || sortParam === "price_desc") {
     const dir = sortParam === "price_asc" ? 1 : -1
     mergedResults.hits.sort((a: any, b: any) => {
+      // Quote-only items always sort to the end — they don't compete
+      // with priced items on price, regardless of direction.
+      const qa = a.is_quote_only === true
+      const qb = b.is_quote_only === true
+      if (qa !== qb) return qa ? 1 : -1
+
       const pa = typeof a.price_cents === "number" ? a.price_cents : null
       const pb = typeof b.price_cents === "number" ? b.price_cents : null
-      // Quote-only / unpriced items sort to the end in both directions.
+      // Null / missing price also goes to the end among each tier.
       if (pa === null && pb === null) return 0
       if (pa === null) return 1
       if (pb === null) return -1
