@@ -420,9 +420,18 @@ export async function GET(req: MedusaStoreRequest, res: MedusaResponse) {
     const sortValue = sortMapping[sortParam] || sortParam
     // Only apply sort if it's a valid format (contains : or is in mapping)
     if (sortValue.includes(":")) {
+      // Price sorts: prefix with is_quote_only:asc so Meilisearch ranks
+      // priced items (is_quote_only=false) globally before quote-only
+      // items (is_quote_only=true) in BOTH directions — quotes always
+      // at the end. Without this, pagination ships a page full of
+      // quote-only items first when they outnumber priced items.
+      const sortArray =
+        sortParam === "price_asc" || sortParam === "price_desc"
+          ? ["is_quote_only:asc", sortValue]
+          : [sortValue]
       searchOptions.additionalOptions = {
         ...(searchOptions.additionalOptions ?? {}),
-        sort: [sortValue],
+        sort: sortArray,
       }
     }
   }

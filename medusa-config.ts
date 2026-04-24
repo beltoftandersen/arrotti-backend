@@ -492,6 +492,7 @@ module.exports = defineConfig({
                 "avg_rating",
                 "vehicle_token_count",
                 "primary_category_handle",
+                "is_quote_only",
               ],
               // Tiebreakers appended after Meilisearch defaults:
               // - vehicle_token_count:asc — shorter vehicle strings win

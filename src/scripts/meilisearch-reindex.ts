@@ -38,6 +38,9 @@ const SORTABLE_ATTRIBUTES = [
   "avg_rating",
   "vehicle_token_count",
   "primary_category_handle",
+  // Used as a primary sort key so quote-only items rank after all
+  // priced items when the user sorts by price.
+  "is_quote_only",
 ]
 
 // Tiebreakers appended after Meilisearch defaults:
