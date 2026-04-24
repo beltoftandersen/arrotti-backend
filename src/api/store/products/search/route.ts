@@ -428,9 +428,11 @@ export async function GET(req: MedusaStoreRequest, res: MedusaResponse) {
   }
 
   // When sorting by price, hide products with no real price data so
-  // unpriced / quote-only items don't dominate the top of the asc list.
+  // truly unpriced items don't dominate the top of the asc list — but
+  // keep quote-only products visible, since they intentionally have no
+  // price_cents and should still appear in sorted results.
   if (sortParam === "price_asc" || sortParam === "price_desc") {
-    filterParts.push("price_cents > 0")
+    filterParts.push("(price_cents > 0 OR is_quote_only = true)")
   }
 
   if (filterParts.length) {
