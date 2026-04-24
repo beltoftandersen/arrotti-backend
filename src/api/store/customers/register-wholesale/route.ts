@@ -309,6 +309,11 @@ export async function POST(
         registration_source: "wholesale_portal",
         reapplied_at: new Date().toISOString(),
         reapply_count: (carriedMetadata.reapply_count || 0) + 1,
+        // Medusa merges metadata on update; explicit nulls are required
+        // to actually remove keys rather than just leave the old values.
+        rejected_at: null,
+        rejected_by: null,
+        rejection_reason: null,
       }
 
       const [updated] = await customerModule.updateCustomers(
