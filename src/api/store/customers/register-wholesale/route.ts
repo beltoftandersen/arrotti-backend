@@ -226,7 +226,7 @@ export async function POST(
     }
 
     if (isReapply && registeredRow) {
-      // Replace auth identity so the newly submitted password takes effect.
+      // Find the existing auth identity/identities for this customer.
       let existingIdentities: any[] = []
       try {
         existingIdentities = await authModule.listAuthIdentities({
@@ -246,6 +246,9 @@ export async function POST(
         }
       }
 
+      // Delete old identities FIRST to free the email for re-registration.
+      // If the subsequent register() fails, we recreate identities from
+      // the old ones to avoid locking the customer out completely.
       for (const identity of existingIdentities) {
         try {
           await authModule.deleteAuthIdentities([identity.id])
@@ -263,17 +266,23 @@ export async function POST(
         } as any)
       } catch (authError: any) {
         logger.error(
-          `[Wholesale Reapply] Failed to register new auth identity for ${emailLc}: ${authError.message}`
+          `[Wholesale Reapply] Failed to register new auth identity for ${emailLc}: ${authError.message}. Customer ${registeredRow.id} may now be locked out — admin must reset password.`
         )
         res.status(500).json({
-          message: "Reapplication failed. Please try again later.",
+          message:
+            "Reapplication failed due to an internal error. Please contact support at orders@arrottigroup.com.",
         })
         return
       }
 
       if (!reapplyAuthResult?.success || !reapplyAuthResult.authIdentity) {
+        logger.error(
+          `[Wholesale Reapply] register() returned unsuccessful for ${emailLc}. Customer ${registeredRow.id} may now be locked out.`
+        )
         res.status(400).json({
-          message: reapplyAuthResult?.error || "Failed to reset authentication",
+          message:
+            reapplyAuthResult?.error ||
+            "Failed to reset authentication. Please contact support.",
         })
         return
       }
@@ -485,9 +494,11 @@ export async function POST(
     // Persist the billing address on the customer account so checkout,
     // QBO sync, and tax lookup can use it. Also marked as default shipping
     // per product decision (B2B customers typically ship to the same place).
+    //
+    // On reapply, update the existing default billing address in place
+    // instead of appending a duplicate.
     try {
-      await customerModule.createCustomerAddresses([{
-        customer_id: customerResult.id,
+      const addressPayload = {
         first_name: body.first_name,
         last_name: body.last_name,
         company: body.company_name || undefined,
@@ -500,7 +511,29 @@ export async function POST(
         phone: normalizedPhone,
         is_default_billing: true,
         is_default_shipping: true,
-      }])
+      }
+
+      if (isReapply) {
+        const existingAddresses = await customerModule.listCustomerAddresses({
+          customer_id: customerResult.id,
+        })
+        const defaultBilling = existingAddresses.find(
+          (a: any) => a.is_default_billing
+        )
+        if (defaultBilling) {
+          await customerModule.updateCustomerAddresses(defaultBilling.id, addressPayload)
+        } else {
+          await customerModule.createCustomerAddresses([{
+            customer_id: customerResult.id,
+            ...addressPayload,
+          }])
+        }
+      } else {
+        await customerModule.createCustomerAddresses([{
+          customer_id: customerResult.id,
+          ...addressPayload,
+        }])
+      }
     } catch (addrErr: any) {
       // Don't fail registration if the address write fails — log and move on;
       // the customer can add one at first checkout.
